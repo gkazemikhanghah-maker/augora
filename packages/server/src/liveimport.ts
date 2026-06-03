@@ -124,6 +124,62 @@ function inferEventType(ev: LiveEvent, override?: MarketType): MarketType {
 
 type KeyedMember = { lm: LiveMarket; parsed: ReturnType<typeof parseOrderKey>; value: number | undefined };
 
+type MemberSpec = {
+  sourceId: string | null; // null = synthetic "Other" row (no Polymarket id)
+  slug?: string;
+  label: string;
+  fair: number;
+  expiryTs: number;
+  orderValue?: number;
+  orderKind?: "number" | "date";
+  orderLabel?: string;
+};
+
+const TOP_N = 5;
+
+/** Decide which members of an event to actually import. For a big categorical
+ *  event (e.g. a 128-candidate nominee race) most options are placeholder/no-
+ *  liquidity markets sitting at Polymarket's default 50¢ — pure noise. We keep
+ *  only the TOP_N options with real trade volume and fold everything else into a
+ *  single "Other" row, the way Polymarket itself collapses the long tail. Ladder
+ *  and small groups are kept in full. */
+function buildMemberSpecs(ev: LiveEvent, type: MarketType): MemberSpec[] {
+  const collapse = type === "categorical" && ev.markets.length > TOP_N + 1;
+  if (!collapse) {
+    return orderMembers(ev, type).map(({ lm, parsed, value }) => ({
+      sourceId: lm.id,
+      slug: lm.slug,
+      label: liveGroupLabel(lm),
+      fair: fairYesFromLive(lm, 1),
+      expiryTs: endTs(lm),
+      ...(value != null && parsed ? { orderValue: value, orderKind: parsed.kind, orderLabel: parsed.axisLabel } : {}),
+    }));
+  }
+  // "meaningful" = has real trade volume; placeholders trade ~0 and sit at 50¢.
+  const hasVol = ev.markets.some((m) => (m.volume ?? 0) > 0);
+  const real = hasVol
+    ? ev.markets.filter((m) => (m.volume ?? 0) > 0)
+    : ev.markets.filter((m) => { const p = m.outcomes[0]?.priceCents; return p != null && p !== 50; });
+  const pool = real.length ? real : ev.markets;
+  const top = [...pool].sort((a, b) => (b.outcomes[0]?.priceCents ?? 0) - (a.outcomes[0]?.priceCents ?? 0)).slice(0, TOP_N);
+
+  const specs: MemberSpec[] = top.map((lm) => ({
+    sourceId: lm.id,
+    slug: lm.slug,
+    label: liveGroupLabel(lm),
+    fair: fairYesFromLive(lm, 1),
+    expiryTs: endTs(lm),
+  }));
+  const sum = specs.reduce((s, m) => s + m.fair, 0);
+  specs.push({
+    sourceId: null,
+    label: "Other",
+    fair: Math.max(1, Math.min(99, 100 - sum)),
+    expiryTs: Math.max(...ev.markets.map(endTs)),
+  });
+  return specs;
+}
+
 /** Extract numeric order keys and return members in display order (ascending by
  *  value for orderable/ladder groups, else input order). Shared by create + refresh. */
 function orderMembers(ev: LiveEvent, type: MarketType): KeyedMember[] {
@@ -165,11 +221,15 @@ export async function importLiveEvent(
   if (existing.length) {
     // map each existing member to its fresh data by sourceId (robust to ordering
     // and to the list endpoint returning a different subset). Members with no
-    // fresh price drop to a low longshot instead of clinging to a stale value.
+    // map each existing member to its fresh data by sourceId (robust to ordering
+    // and to the list endpoint returning a different subset). The synthetic
+    // "Other" row (no sourceId) is re-priced to the recomputed residual.
+    const otherFair = buildMemberSpecs(ev, type).find((s) => s.sourceId == null)?.fair ?? 1;
     const bySource = new Map(ev.markets.map((lm) => [lm.id, lm]));
     for (const m of existing) {
       if (store.settlement.isSettled(m.id)) continue;
-      const lm = m.sourceId ? bySource.get(m.sourceId) : undefined;
+      if (!m.sourceId) { requote(store, m.id, otherFair); continue; }
+      const lm = bySource.get(m.sourceId);
       requote(store, m.id, lm ? fairYesFromLive(lm, 1) : 1);
     }
     return { groupId, type, markets: existing, event: ev };
@@ -185,48 +245,44 @@ export async function importLiveEvent(
   store.ensureUser(MM);
   const created: Market[] = [];
 
-  const seq = orderMembers(ev, type);
-  const orderable = seq.every((k) => k.value != null);
+  const specs = buildMemberSpecs(ev, type);
 
-  // big events (60–128 options) need the MM funded enough to back every quote,
-  // else a mid-loop quote hits the negative-balance guard and aborts the import.
-  const qty = seq.length > 40 ? 400 : seq.length > 12 ? 800 : 2000;
-  const need = seq.length * qty * 100 + 2_000_000; // worst-case lock + buffer
+  // fund the MM enough to back every quote, else a mid-loop quote hits the
+  // negative-balance guard and aborts the import.
+  const qty = specs.length > 40 ? 400 : specs.length > 12 ? 800 : 2000;
+  const need = specs.length * qty * 100 + 2_000_000;
   const have = store.ledger.bal(MM);
   if (have < need) store.ledger.deposit(MM, need - have);
 
-  seq.forEach(({ lm, parsed, value }, i) => {
+  specs.forEach((sp, i) => {
     const id = `${groupId}-${i}`;
-    const fairYes = fairYesFromLive(lm, 1);
-    const label = liveGroupLabel(lm);
     const market: Market = {
       id,
-      question: `${ev.title}: ${label}?`,
+      question: `${ev.title}: ${sp.label}?`,
       type,
       groupId,
-      expiryTs: endTs(lm),
+      expiryTs: sp.expiryTs,
       status: "open",
       feeMult: 0,
       tickSize: 1,
       createdTs: Date.now(),
       source: "polymarket",
-      sourceId: lm.id, // per-member real id → individual price/settlement sync
-      sourceSlug: lm.slug,
       groupTitle: ev.title,
-      optionLabel: label,
+      optionLabel: sp.label,
       category: ev.category,
-      ...(orderable && value != null
-        ? { orderValue: value, orderKind: parsed!.kind, orderLabel: parsed!.axisLabel }
-        : {}),
+      // only real members carry a Polymarket id (drives individual price/settle sync);
+      // the synthetic "Other" row has none, so the sync skips it.
+      ...(sp.sourceId ? { sourceId: sp.sourceId, sourceSlug: sp.slug } : {}),
+      ...(sp.orderValue != null ? { orderValue: sp.orderValue, orderKind: sp.orderKind, orderLabel: sp.orderLabel } : {}),
     };
     store.addMarket(market);
     // one bad option must not abort the whole group import
     try {
-      quote(store, id, fairYes, 2, qty);
+      quote(store, id, sp.fair, 2, qty);
     } catch {
       /* leave this option with a thin/empty book; market still exists */
     }
-    seedFlatHistory(store, id, fairYes);
+    seedFlatHistory(store, id, sp.fair);
     store.recordPrice(id);
     created.push(market);
   });
