@@ -163,12 +163,15 @@ export async function importLiveEvent(
     .filter((m) => m.groupId === groupId)
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   if (existing.length) {
-    const fresh = orderMembers(ev, type);
-    existing.forEach((m, i) => {
-      const lm = fresh[i]?.lm;
-      if (!lm || store.settlement.isSettled(m.id)) return;
-      requote(store, m.id, fairYesFromLive(lm, 1)); // records the new price too
-    });
+    // map each existing member to its fresh data by sourceId (robust to ordering
+    // and to the list endpoint returning a different subset). Members with no
+    // fresh price drop to a low longshot instead of clinging to a stale value.
+    const bySource = new Map(ev.markets.map((lm) => [lm.id, lm]));
+    for (const m of existing) {
+      if (store.settlement.isSettled(m.id)) continue;
+      const lm = m.sourceId ? bySource.get(m.sourceId) : undefined;
+      requote(store, m.id, lm ? fairYesFromLive(lm, 1) : 1);
+    }
     return { groupId, type, markets: existing, event: ev };
   }
 
