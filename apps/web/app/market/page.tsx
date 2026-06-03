@@ -8,7 +8,6 @@ import {
 } from "@/lib/api";
 import type { Side, Trade } from "@augora/core";
 import { StrategyBuilder } from "@/components/StrategyBuilder";
-import { GroupStrategyBuilder } from "@/components/GroupStrategyBuilder";
 import { QuickTrade } from "@/components/QuickTrade";
 import { ResolvePanel } from "@/components/ResolvePanel";
 import { OutcomeRows } from "@/components/OutcomeRows";
@@ -206,11 +205,10 @@ function MarketDetail() {
             <h2 className="text-[20px] font-extrabold tracking-[-0.02em]">Build a strategy</h2>
             <span className="text-[12.5px] text-muted">More than yes/no — combine legs and see your risk before executing.</span>
           </div>
-          {multi ? (
-            <GroupStrategyBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
-          ) : (
-            <StrategyBuilder market={market} onExecuted={refreshAccount} />
-          )}
+          {/* Per-outcome strategy: the single-market builder, scoped to the
+              outcome the user opened. The cross-outcome (spread) builder is kept
+              in GroupStrategyBuilder for a later, deliberate re-introduction. */}
+          <StrategyBuilder market={market} onExecuted={refreshAccount} />
           {/* Templates will live here next */}
           <div className="mt-6 rounded-xl border border-dashed border-line bg-card p-5 text-center text-[12.5px] text-muted">
             Strategy templates (e.g. “cheap long shot”, “fade the favorite”) are coming here next.
