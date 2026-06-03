@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f7f8f8;
+  --card: #ffffff;
+  --ink: #1c1d1f;
+  --muted: #6b7077;
+  --line: #e9eaec;
+  --line-strong: #d8dade;
+  --green: #16a34a;
+  --green-soft: #e9f7ef;
+  --red: #e0483a;
+  --red-soft: #fdeeec;
+  --amber: #b9772a;
+  --blue: #2f6aa6;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+body {
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--bg);
+  letter-spacing: -0.011em;
+}
+
+/* tabular figures everywhere we used the mono class for numbers */
+.font-mono { font-variant-numeric: tabular-nums; }
+
+::selection { background: rgba(22, 163, 74, 0.16); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #d8dade; border: 3px solid transparent; border-radius: 999px; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #c3c6cb; background-clip: content-box; }
+
+button { cursor: pointer; transition: transform .1s ease, opacity .15s ease, background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease; }
+button:active { transform: translateY(1px); }
+a, input { transition: all .15s ease; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.reveal { animation: fadeUp .45s cubic-bezier(.22,.61,.36,1) both; }
+
+@keyframes flashUp { 0% { color: var(--green); } 100% { color: var(--ink); } }
+@keyframes flashDown { 0% { color: var(--red); } 100% { color: var(--ink); } }
+.flash-up { animation: flashUp .8s ease-out; }
+.flash-down { animation: flashDown .8s ease-out; }
+
+@keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.live-dot { animation: livePulse 1.6s ease-in-out infinite; }
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 4px; background: #e3e5e8; cursor: pointer; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--ink); border: 3px solid var(--card); cursor: pointer; box-shadow: 0 1px 3px rgba(20,20,25,.25); }
