@@ -9,6 +9,7 @@ import {
 import type { Side, Trade } from "@augora/core";
 import { StrategyBuilder } from "@/components/StrategyBuilder";
 import { GroupStrategyBuilder } from "@/components/GroupStrategyBuilder";
+import { CorridorBuilder } from "@/components/CorridorBuilder";
 import { QuickTrade } from "@/components/QuickTrade";
 import { ResolvePanel } from "@/components/ResolvePanel";
 import { OutcomeRows } from "@/components/OutcomeRows";
@@ -207,7 +208,11 @@ function MarketDetail() {
             <h2 className="text-[20px] font-extrabold tracking-[-0.02em]">Build a spread</h2>
             <span className="text-[12.5px] text-muted">Combine legs across outcomes — all fill together or nothing commits.</span>
           </div>
-          <GroupStrategyBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
+          {group[0]?.representation === "CUMULATIVE" && group[0]?.taxonomyConfirmed ? (
+            <CorridorBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
+          ) : (
+            <GroupStrategyBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
+          )}
         </div>
       ) : (
         <div className="mt-5">

@@ -132,3 +132,52 @@ export function scaleW(a: WVector, s: number): WVector {
   for (const k of Object.keys(a)) out[k] = a[k]! * s;
   return out;
 }
+
+/* ----------------------- cumulative ladders (type D) ---------------------- *
+ * Members of a cumulative ladder are *thresholds* ("by 2026", "≥ $50k"), NOT
+ * MECE atoms — several resolve YES at once. The true MECE atoms are the WINDOWS
+ * between consecutive thresholds. We derive them here so the risk engine runs on
+ * a real partition, and we map a window-range corridor back to the executable
+ * threshold legs (Buy-YES wider + Buy-NO narrower) per addendum v1.1 §2.        */
+
+export interface Rung {
+  id: string;
+  label: string;
+  /** Cumulative YES price/probability of this threshold, in [0,1]. */
+  cumPrice: number;
+}
+
+export interface WindowAtom extends Atom {
+  label: string;
+}
+
+/** Sorted rungs (ascending cumulative price) → MECE window atoms (N+1 of them). */
+export function deriveCumulativeAtoms(rungs: Rung[]): WindowAtom[] {
+  const r = [...rungs].sort((a, b) => a.cumPrice - b.cumPrice);
+  const n = r.length;
+  const atoms: WindowAtom[] = [];
+  for (let k = 0; k <= n; k++) {
+    const lo = k === 0 ? 0 : r[k - 1]!.cumPrice;
+    const hi = k === n ? 1 : r[k]!.cumPrice;
+    const label =
+      k === 0 ? `${r[0]!.label}` : k === n ? `after ${r[n - 1]!.label}` : `${r[k - 1]!.label} → ${r[k]!.label}`;
+    atoms.push({ id: `win_${k}`, index: k, price: Math.max(0, hi - lo), label });
+  }
+  return atoms;
+}
+
+/** A window-range corridor [i..j] over N rungs → executable threshold legs.
+ *  Upper bound j < N ⇒ Buy-YES(rung j); lower bound i > 0 ⇒ Buy-NO(rung i−1). */
+export function corridorLegsCumulative(
+  rungsAsc: Rung[],
+  fromAtom: number,
+  toAtom: number,
+): { memberId: string; side: "YES" | "NO" }[] {
+  if (fromAtom > toAtom) throw new Error("empty corridor");
+  const r = [...rungsAsc].sort((a, b) => a.cumPrice - b.cumPrice);
+  const n = r.length;
+  const legs: { memberId: string; side: "YES" | "NO" }[] = [];
+  if (toAtom < n) legs.push({ memberId: r[toAtom]!.id, side: "YES" });
+  if (fromAtom > 0) legs.push({ memberId: r[fromAtom - 1]!.id, side: "NO" });
+  return legs;
+}

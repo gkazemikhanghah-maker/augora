@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   wMetrics, buildSingle, buildBasket, buildCorridor, buildThreshold, buildLongShort,
-  addW, scaleW, type Atom,
+  addW, scaleW, deriveCumulativeAtoms, corridorLegsCumulative, type Atom,
 } from "../src/wengine.js";
 import { groupPayoff } from "../src/calc.js";
 
@@ -85,6 +85,39 @@ describe("w-engine universal metrics", () => {
 
   it("empty corridor throws", () => {
     expect(() => buildCorridor(atoms, 2, 1)).toThrow();
+  });
+});
+
+describe("cumulative ladder → window atoms + corridor legs (peace-deal model)", () => {
+  const rungs = [
+    { id: "T1", label: "by Q3 2026", cumPrice: 0.18 },
+    { id: "T2", label: "by end 2026", cumPrice: 0.31 },
+    { id: "T3", label: "by end 2027", cumPrice: 0.52 },
+  ];
+
+  it("derives 4 MECE window atoms whose prices sum to 1", () => {
+    const atoms = deriveCumulativeAtoms(rungs);
+    expect(atoms.map((a) => a.id)).toEqual(["win_0", "win_1", "win_2", "win_3"]);
+    expect(atoms.map((a) => +a.price.toFixed(2))).toEqual([0.18, 0.13, 0.21, 0.48]);
+    expect(atoms.reduce((s, a) => s + a.price, 0)).toBeCloseTo(1);
+  });
+
+  it("single-window corridor [1,1] = Q4 2026: net cost 13%, legs YES(T2)+NO(T1)", () => {
+    const atoms = deriveCumulativeAtoms(rungs);
+    const w = buildCorridor(atoms, 1, 1);
+    const m = wMetrics(w, atoms);
+    expect(m.cost).toBeCloseTo(0.13);
+    expect(m.maxLoss).toBeCloseTo(0.13);
+    expect(m.breakevenProb).toBeCloseTo(0.13);
+    expect(corridorLegsCumulative(rungs, 1, 1)).toEqual([
+      { memberId: "T2", side: "YES" },
+      { memberId: "T1", side: "NO" },
+    ]);
+  });
+
+  it("corridor from the start [0,1] needs only a YES leg; to the end [2,3] only a NO leg", () => {
+    expect(corridorLegsCumulative(rungs, 0, 1)).toEqual([{ memberId: "T2", side: "YES" }]);
+    expect(corridorLegsCumulative(rungs, 2, 3)).toEqual([{ memberId: "T2", side: "NO" }]);
   });
 });
 

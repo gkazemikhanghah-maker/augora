@@ -77,6 +77,10 @@ export function seed(store: Store): void {
       question: `Iran\u2013US peace deal ${l.label}?`,
       type: "ladder",
       groupId: ladderGroup,
+      orderingType: "INTERVAL",
+      representation: "CUMULATIVE",
+      axisDirection: "INCREASING",
+      taxonomyConfirmed: true,
       expiryTs: Date.now() + l.days * DAY,
     });
     store.addMarket(m);
@@ -98,6 +102,8 @@ export function seed(store: Store): void {
       question: `2028 nominee: ${c.label}?`,
       type: "categorical",
       groupId: elGroup,
+      orderingType: "NOMINAL",
+      taxonomyConfirmed: true,
       expiryTs: Date.now() + 365 * DAY,
     });
     store.addMarket(m);
