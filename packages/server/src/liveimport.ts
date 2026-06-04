@@ -1,6 +1,6 @@
 import type { Market, MarketType } from "@augora/core";
 import { Store } from "./store.js";
-import { getLiveMarket, getLiveEvent, liveGroupLabel, parseOrderKey, type LiveMarket, type LiveEvent } from "./livedata.js";
+import { getLiveMarket, getLiveEvent, liveGroupLabel, parseOrderKey, fetchLiveHistory, type LiveMarket, type LiveEvent } from "./livedata.js";
 
 const MM = "mm-bot";
 const DAY = 86_400_000;
@@ -47,6 +47,16 @@ function seedFlatHistory(store: Store, marketId: string, priceC: number, n = 24)
   const t0 = Date.now() - n * 3_600_000;
   const p = Math.round(Math.min(99, Math.max(1, priceC)));
   for (let i = 0; i <= n; i++) hist.push({ ts: t0 + i * 3_600_000, midCents: p });
+}
+
+/** Seed a market's chart with REAL Polymarket history when we can fetch it,
+ *  otherwise a flat line at the imported price. Never throws. */
+async function seedHistory(store: Store, marketId: string, yesTokenId: string | null | undefined, fair: number): Promise<void> {
+  const hist = store.priceHistory.get(marketId);
+  if (!hist || hist.length) return;
+  const real = await fetchLiveHistory(yesTokenId);
+  if (real.length >= 2) hist.push(...real);
+  else seedFlatHistory(store, marketId, fair);
 }
 
 /**
@@ -96,7 +106,7 @@ export async function importLiveMarket(
   store.addMarket(market);
   // deep, tight book so paper trades fill cleanly at ~the live price
   quote(store, id, fairYes, 2, 2000);
-  seedFlatHistory(store, id, fairYes);
+  await seedHistory(store, id, live.yesTokenId, fairYes);
   store.recordPrice(id);
   return { market, live };
 }
@@ -127,6 +137,7 @@ type KeyedMember = { lm: LiveMarket; parsed: ReturnType<typeof parseOrderKey>; v
 type MemberSpec = {
   sourceId: string | null; // null = synthetic "Other" row (no Polymarket id)
   slug?: string;
+  yesTokenId?: string | null;
   label: string;
   fair: number;
   expiryTs: number;
@@ -149,6 +160,7 @@ function buildMemberSpecs(ev: LiveEvent, type: MarketType): MemberSpec[] {
     return orderMembers(ev, type).map(({ lm, parsed, value }) => ({
       sourceId: lm.id,
       slug: lm.slug,
+      yesTokenId: lm.yesTokenId,
       label: liveGroupLabel(lm),
       fair: fairYesFromLive(lm, 1),
       expiryTs: endTs(lm),
@@ -164,8 +176,9 @@ function buildMemberSpecs(ev: LiveEvent, type: MarketType): MemberSpec[] {
   const top = [...pool].sort((a, b) => (b.outcomes[0]?.priceCents ?? 0) - (a.outcomes[0]?.priceCents ?? 0)).slice(0, TOP_N);
 
   const specs: MemberSpec[] = top.map((lm) => ({
-    sourceId: lm.id,
-    slug: lm.slug,
+      sourceId: lm.id,
+      slug: lm.slug,
+      yesTokenId: lm.yesTokenId,
     label: liveGroupLabel(lm),
     fair: fairYesFromLive(lm, 1),
     expiryTs: endTs(lm),
@@ -254,8 +267,9 @@ export async function importLiveEvent(
   const have = store.ledger.bal(MM);
   if (have < need) store.ledger.deposit(MM, need - have);
 
-  specs.forEach((sp, i) => {
-    const id = `${groupId}-${i}`;
+  let i = 0;
+  for (const sp of specs) {
+    const id = `${groupId}-${i++}`;
     const market: Market = {
       id,
       question: `${ev.title}: ${sp.label}?`,
@@ -270,22 +284,19 @@ export async function importLiveEvent(
       groupTitle: ev.title,
       optionLabel: sp.label,
       category: ev.category,
-      // only real members carry a Polymarket id (drives individual price/settle sync);
-      // the synthetic "Other" row has none, so the sync skips it.
       ...(sp.sourceId ? { sourceId: sp.sourceId, sourceSlug: sp.slug } : {}),
       ...(sp.orderValue != null ? { orderValue: sp.orderValue, orderKind: sp.orderKind, orderLabel: sp.orderLabel } : {}),
     };
     store.addMarket(market);
-    // one bad option must not abort the whole group import
     try {
       quote(store, id, sp.fair, 2, qty);
     } catch {
       /* leave this option with a thin/empty book; market still exists */
     }
-    seedFlatHistory(store, id, sp.fair);
+    await seedHistory(store, id, sp.yesTokenId, sp.fair);
     store.recordPrice(id);
     created.push(market);
-  });
+  }
 
   return { groupId, type, markets: created, event: ev };
 }

@@ -8,6 +8,7 @@
  */
 
 const GAMMA = "https://gamma-api.polymarket.com";
+const CLOB = "https://clob.polymarket.com";
 const TTL_MS = 10_000;
 
 type CacheEntry = { at: number; data: unknown };
@@ -22,6 +23,30 @@ async function cachedGet(url: string): Promise<unknown> {
   const data = await res.json();
   cache.set(url, { at: now, data });
   return data;
+}
+
+/** Real price history for a YES token from Polymarket's CLOB. Returns points in
+ *  our chart shape ({ts ms, midCents}). Defensive: any failure → [] so callers
+ *  fall back to a flat seed. interval/fidelity pick the window & resolution. */
+export async function fetchLiveHistory(
+  yesTokenId: string | null | undefined,
+  interval = "1m",
+  fidelity = 180,
+): Promise<{ ts: number; midCents: number }[]> {
+  if (!yesTokenId) return [];
+  const url = `${CLOB}/prices-history?market=${encodeURIComponent(yesTokenId)}&interval=${interval}&fidelity=${fidelity}`;
+  try {
+    const data = (await cachedGet(url)) as { history?: { t: number; p: number | string }[] };
+    const hist = Array.isArray(data?.history) ? data.history : [];
+    return hist
+      .map((h) => {
+        const p = num(h.p);
+        return { ts: (Number(h.t) || 0) * 1000, midCents: p == null ? 50 : Math.max(1, Math.min(99, Math.round(p * 100))) };
+      })
+      .filter((pt) => pt.ts > 0);
+  } catch {
+    return [];
+  }
 }
 
 export interface LiveOutcome {
@@ -45,6 +70,8 @@ export interface LiveMarket {
   bestBidCents: number | null;
   bestAskCents: number | null;
   image: string | null;
+  /** CLOB token id of the YES outcome — used to fetch real price history. */
+  yesTokenId: string | null;
   source: "polymarket";
 }
 
@@ -163,6 +190,7 @@ function normalize(m: any): LiveMarket {
     bestBidCents: m.bestBid != null ? Math.round(num(m.bestBid)! * 100) : null,
     bestAskCents: m.bestAsk != null ? Math.round(num(m.bestAsk)! * 100) : null,
     image: m.image ?? m.icon ?? null,
+    yesTokenId: parseMaybeJson<string[]>(m.clobTokenIds, [])[0] ?? null,
     source: "polymarket",
   };
 }
