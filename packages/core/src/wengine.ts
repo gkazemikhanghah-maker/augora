@@ -167,17 +167,27 @@ export function deriveCumulativeAtoms(rungs: Rung[]): WindowAtom[] {
 }
 
 /** A window-range corridor [i..j] over N rungs → executable threshold legs.
- *  Upper bound j < N ⇒ Buy-YES(rung j); lower bound i > 0 ⇒ Buy-NO(rung i−1). */
+ *  direction "back" (debit): you win IN the window.
+ *    upper j<N ⇒ Buy-YES(rung j); lower i>0 ⇒ Buy-NO(rung i−1).
+ *  direction "fade" (credit, a short call/put spread): you collect a credit and
+ *  lose (capped) only if it lands IN the window — the negative of "back".
+ *    upper j<N ⇒ Write-YES(rung j); lower i>0 ⇒ Buy-YES(rung i−1). */
 export function corridorLegsCumulative(
   rungsAsc: Rung[],
   fromAtom: number,
   toAtom: number,
-): { memberId: string; side: "YES" | "NO" }[] {
+  direction: "back" | "fade" = "back",
+): { memberId: string; side: "YES" | "NO"; intent: "buy" | "write" }[] {
   if (fromAtom > toAtom) throw new Error("empty corridor");
   const r = [...rungsAsc].sort((a, b) => a.cumPrice - b.cumPrice);
   const n = r.length;
-  const legs: { memberId: string; side: "YES" | "NO" }[] = [];
-  if (toAtom < n) legs.push({ memberId: r[toAtom]!.id, side: "YES" });
-  if (fromAtom > 0) legs.push({ memberId: r[fromAtom - 1]!.id, side: "NO" });
+  const legs: { memberId: string; side: "YES" | "NO"; intent: "buy" | "write" }[] = [];
+  if (direction === "back") {
+    if (toAtom < n) legs.push({ memberId: r[toAtom]!.id, side: "YES", intent: "buy" });
+    if (fromAtom > 0) legs.push({ memberId: r[fromAtom - 1]!.id, side: "NO", intent: "buy" });
+  } else {
+    if (toAtom < n) legs.push({ memberId: r[toAtom]!.id, side: "YES", intent: "write" });
+    if (fromAtom > 0) legs.push({ memberId: r[fromAtom - 1]!.id, side: "YES", intent: "buy" });
+  }
   return legs;
 }

@@ -130,14 +130,29 @@ describe("cumulative ladder → window atoms + corridor legs (peace-deal model)"
     expect(m.maxLoss).toBeCloseTo(0.13);
     expect(m.breakevenProb).toBeCloseTo(0.13);
     expect(corridorLegsCumulative(rungs, 1, 1)).toEqual([
-      { memberId: "T2", side: "YES" },
-      { memberId: "T1", side: "NO" },
+      { memberId: "T2", side: "YES", intent: "buy" },
+      { memberId: "T1", side: "NO", intent: "buy" },
     ]);
   });
 
   it("corridor from the start [0,1] needs only a YES leg; to the end [2,3] only a NO leg", () => {
-    expect(corridorLegsCumulative(rungs, 0, 1)).toEqual([{ memberId: "T2", side: "YES" }]);
-    expect(corridorLegsCumulative(rungs, 2, 3)).toEqual([{ memberId: "T2", side: "NO" }]);
+    expect(corridorLegsCumulative(rungs, 0, 1)).toEqual([{ memberId: "T2", side: "YES", intent: "buy" }]);
+    expect(corridorLegsCumulative(rungs, 2, 3)).toEqual([{ memberId: "T2", side: "NO", intent: "buy" }]);
+  });
+
+  it("FADE a window (credit / short call spread): Write-YES(far) + Buy-YES(near), and w is negative", () => {
+    // fade window [1,1] = collect the window's probability as a credit, lose only if it lands there
+    const atoms = deriveCumulativeAtoms(rungs);
+    const short = scaleW(buildCorridor(atoms, 1, 1), -1);
+    const m = wMetrics(short, atoms);
+    expect(m.cost).toBeCloseTo(-0.13); // credit of 13%
+    expect(m.collateral).toBe(1); // a written short blocks full collateral
+    expect(m.maxProfit).toBeCloseTo(0.13); // keep the credit if outside
+    expect(m.maxLoss).toBeCloseTo(0.87); // lose 1 − credit if inside
+    expect(corridorLegsCumulative(rungs, 1, 1, "fade")).toEqual([
+      { memberId: "T2", side: "YES", intent: "write" },
+      { memberId: "T1", side: "YES", intent: "buy" },
+    ]);
   });
 });
 

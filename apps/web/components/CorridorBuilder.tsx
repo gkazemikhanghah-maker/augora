@@ -31,11 +31,12 @@ export function CorridorBuilder({
 
   const [from, setFrom] = useState(Math.min(1, n - 1));
   const [to, setTo] = useState(Math.min(1, n - 1));
+  const [mode, setMode] = useState<"back" | "fade">("back");
   const lo = Math.min(from, to), hi = Math.max(from, to);
 
-  const w = useMemo(() => scaleW(buildCorridor(atoms, lo, hi), QTY), [atoms, lo, hi]);
+  const w = useMemo(() => scaleW(buildCorridor(atoms, lo, hi), mode === "back" ? QTY : -QTY), [atoms, lo, hi, mode]);
   const wm = useMemo(() => wMetrics(w, atoms), [w, atoms]);
-  const legs = useMemo(() => corridorLegsCumulative(rungs, lo, hi), [rungs, lo, hi]);
+  const legs = useMemo(() => corridorLegsCumulative(rungs, lo, hi, mode), [rungs, lo, hi, mode]);
 
   const priceOf = (id: string, side: "YES" | "NO") => {
     const m = group.find((x) => x.id === id);
@@ -43,7 +44,9 @@ export function CorridorBuilder({
     return side === "YES" ? y : 1 - y;
   };
   const labelOf = (id: string) => rungs.find((r) => r.id === id)?.label ?? id;
-  const gross = legs.reduce((s, l) => s + QTY * priceOf(l.memberId, l.side), 0);
+  // gross capital actually tied up: buy legs cost premium, a write leg blocks full $1
+  const gross = legs.reduce((s, l) => s + QTY * (l.intent === "write" ? 1 : priceOf(l.memberId, l.side)), 0);
+  const credit = wm.cost < 0; // fade positions open for a net credit
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -55,10 +58,10 @@ export function CorridorBuilder({
     if (legs.length === 0) return;
     setBusy(true); setMsg(null);
     try {
-      const apiLegs: GroupLeg[] = legs.map((l) => ({ marketId: l.memberId, side: l.side, type: "market", qty: QTY }));
+      const apiLegs: GroupLeg[] = legs.map((l) => ({ marketId: l.memberId, side: l.side, type: "market", qty: QTY, intent: l.intent }));
       const { executed } = await api.executeStrategyGroup(apiLegs);
       const filled = executed.reduce((s, e) => s + e.trades.reduce((t, x) => t + x.qty, 0), 0);
-      setMsg({ ok: true, text: `✓ Corridor executed atomically · ${filled} contracts filled` });
+      setMsg({ ok: true, text: `✓ ${mode === "back" ? "Corridor" : "Credit spread"} executed atomically · ${filled} contracts` });
       onExecuted?.();
     } catch (e) {
       setMsg({ ok: false, text: `✗ ${(e as Error).message}` });
@@ -80,8 +83,23 @@ export function CorridorBuilder({
         <div className="mt-1.5 text-[15px] font-bold leading-snug tracking-[-0.01em]">{title}</div>
         <div className="mt-1 text-[12px] leading-[1.55] text-muted">
           These are nested deadlines, so the real outcomes are the <span className="font-semibold text-ink">windows</span> between
-          them. Pick a window range — we build it from a Buy-<span className="font-semibold text-green">Yes</span> on the wider
-          deadline plus a Buy-<span className="font-semibold text-red">No</span> on the narrower one, and lock only your net risk.
+          them. Pick a window range, then choose whether to back it or fade it.
+        </div>
+
+        <div className="mt-3 inline-flex rounded-lg border border-line p-0.5">
+          <button onClick={() => setMode("back")}
+            className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${mode === "back" ? "bg-ink text-bg" : "text-muted hover:text-ink"}`}>
+            Back the range
+          </button>
+          <button onClick={() => setMode("fade")}
+            className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${mode === "fade" ? "bg-ink text-bg" : "text-muted hover:text-ink"}`}>
+            Fade the range (credit)
+          </button>
+        </div>
+        <div className="mt-2 text-[11.5px] leading-[1.5] text-muted">
+          {mode === "back"
+            ? "Debit spread: pay a small net cost, win $1 if it lands in this window."
+            : "Credit spread (a short call/put spread): collect the premium up-front via a native Write, lose only — and only a capped amount — if it lands in this window."}
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -108,12 +126,17 @@ export function CorridorBuilder({
           ) : (
             <div className="mt-1.5 flex flex-col gap-1 font-mono text-[12.5px]">
               {legs.map((l) => (
-                <div key={l.memberId + l.side} className="flex items-center justify-between">
+                <div key={l.memberId + l.side + l.intent} className="flex items-center justify-between">
                   <span>
-                    Buy-<span className={l.side === "YES" ? "font-semibold text-green" : "font-semibold text-red"}>{l.side}</span>{" "}
+                    {l.intent === "write" ? "Write-" : "Buy-"}
+                    <span className={l.side === "YES" ? "font-semibold text-green" : "font-semibold text-red"}>{l.side}</span>{" "}
                     <span className="text-ink">{labelOf(l.memberId)}</span>
                   </span>
-                  <span className="text-muted">{Math.round(priceOf(l.memberId, l.side) * 100)}¢</span>
+                  <span className="text-muted">
+                    {l.intent === "write"
+                      ? `get ${Math.round(priceOf(l.memberId, "YES") * 100)}¢ · block $1`
+                      : `${Math.round(priceOf(l.memberId, l.side) * 100)}¢`}
+                  </span>
                 </div>
               ))}
             </div>
@@ -122,7 +145,7 @@ export function CorridorBuilder({
 
         <button onClick={execute} disabled={busy || legs.length === 0}
           className="mt-4 w-full rounded-xl bg-ink py-3 text-[13.5px] font-semibold text-bg transition disabled:opacity-40">
-          {busy ? "Executing…" : `Execute corridor (${legs.length} leg${legs.length === 1 ? "" : "s"})`}
+          {busy ? "Executing…" : `Execute ${mode === "back" ? "corridor" : "credit spread"} (${legs.length} leg${legs.length === 1 ? "" : "s"})`}
         </button>
         {msg && (
           <div className={`mt-3 rounded-lg px-3 py-2 text-[12.5px] ${msg.ok ? "bg-[#eef7ee] text-green" : "bg-[#fbeeee] text-red"}`}>
@@ -135,22 +158,32 @@ export function CorridorBuilder({
       <div className="rounded-2xl border border-line bg-card p-[22px] shadow-soft">
         <div className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">Cost &amp; risk</div>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[13px] border border-line bg-line">
-          <Stat label="Net cost" value={money(wm.cost)} />
-          <Stat label="Gross locked" value={money(gross)} sm />
+          <Stat label={credit ? "Credit received" : "Net cost"} value={money(Math.abs(wm.cost))} color={credit ? "var(--green)" : undefined} />
+          <Stat label={mode === "fade" ? "Collateral blocked" : "Gross locked"} value={money(mode === "fade" ? wm.collateral : gross)} sm />
           <Stat label="Max profit" value={money(wm.maxProfit)} color="var(--green)" />
           <Stat label="Max loss" value={money(wm.maxLoss)} color="var(--red)" />
         </div>
-        <div className="mt-2 flex items-center justify-between rounded-[10px] bg-[#f7f5ef] px-3 py-2 text-[11.5px]">
-          <span className="text-muted">Break-even probability</span>
-          <span className="font-mono font-semibold tabular-nums">
-            {wm.breakevenProb != null ? `${(wm.breakevenProb * 100).toFixed(1)}%` : "—"}
-          </span>
-        </div>
-        <div className="mt-1.5 px-1 text-[11px] leading-[1.5] text-muted">
-          +EV only if the real chance of landing in this range exceeds{" "}
-          <span className="font-semibold text-ink">{wm.breakevenProb != null ? (wm.breakevenProb * 100).toFixed(1) : "—"}%</span>.
-          You put up {money(gross)} gross but at least {money(QTY - wm.maxLoss)} comes back, so net risk is {money(wm.maxLoss)}.
-        </div>
+        {mode === "back" ? (
+          <>
+            <div className="mt-2 flex items-center justify-between rounded-[10px] bg-[#f7f5ef] px-3 py-2 text-[11.5px]">
+              <span className="text-muted">Break-even probability</span>
+              <span className="font-mono font-semibold tabular-nums">
+                {wm.breakevenProb != null ? `${(wm.breakevenProb * 100).toFixed(1)}%` : "—"}
+              </span>
+            </div>
+            <div className="mt-1.5 px-1 text-[11px] leading-[1.5] text-muted">
+              +EV only if the real chance of landing in this range exceeds{" "}
+              <span className="font-semibold text-ink">{wm.breakevenProb != null ? (wm.breakevenProb * 100).toFixed(1) : "—"}%</span>.
+              You put up {money(gross)} gross but at least {money(QTY - wm.maxLoss)} comes back, so net risk is {money(wm.maxLoss)}.
+            </div>
+          </>
+        ) : (
+          <div className="mt-2 rounded-[10px] bg-[#f7f5ef] px-3 py-2 text-[11.5px] leading-[1.5] text-muted">
+            You collect <span className="font-semibold text-green">{money(Math.abs(wm.cost))}</span> up-front and block {money(wm.collateral)} collateral.
+            You keep the credit unless it lands in this window, where the loss is capped at {money(wm.maxLoss)}. Best when you think this range is
+            unlikely.
+          </div>
+        )}
 
         <div className="mb-2 mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">P&amp;L by window</div>
         <div className="flex flex-col gap-1.5">
