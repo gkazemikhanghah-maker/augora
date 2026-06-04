@@ -49,14 +49,33 @@ function seedFlatHistory(store: Store, marketId: string, priceC: number, n = 24)
   for (let i = 0; i <= n; i++) hist.push({ ts: t0 + i * 3_600_000, midCents: p });
 }
 
-/** Seed a market's chart with REAL Polymarket history when we can fetch it,
- *  otherwise a flat line at the imported price. Never throws. */
-async function seedHistory(store: Store, marketId: string, yesTokenId: string | null | undefined, fair: number): Promise<void> {
+/** Seed (or refresh) a market's chart with REAL Polymarket history when we can
+ *  fetch it, otherwise a flat line. Replaces existing flat seed on re-import.
+ *  Returns true if real history was applied. Never throws. */
+async function seedHistory(
+  store: Store,
+  marketId: string,
+  yesTokenId: string | null | undefined,
+  sourceId: string | null | undefined,
+  fair: number,
+): Promise<boolean> {
   const hist = store.priceHistory.get(marketId);
-  if (!hist || hist.length) return;
-  const real = await fetchLiveHistory(yesTokenId);
-  if (real.length >= 2) hist.push(...real);
-  else seedFlatHistory(store, marketId, fair);
+  if (!hist) return false;
+  // the event-list payload often omits clobTokenIds; fall back to the per-market
+  // endpoint to obtain the YES token, then fetch its price history.
+  let token = yesTokenId ?? null;
+  if (!token && sourceId) {
+    const lm = await getLiveMarket(sourceId).catch(() => null);
+    token = lm?.yesTokenId ?? null;
+  }
+  const real = await fetchLiveHistory(token);
+  if (real.length >= 2) {
+    hist.length = 0;
+    hist.push(...real);
+    return true;
+  }
+  if (!hist.length) seedFlatHistory(store, marketId, fair);
+  return false;
 }
 
 /**
@@ -106,7 +125,7 @@ export async function importLiveMarket(
   store.addMarket(market);
   // deep, tight book so paper trades fill cleanly at ~the live price
   quote(store, id, fairYes, 2, 2000);
-  await seedHistory(store, id, live.yesTokenId, fairYes);
+  await seedHistory(store, id, live.yesTokenId, liveId, fairYes);
   store.recordPrice(id);
   return { market, live };
 }
@@ -239,12 +258,16 @@ export async function importLiveEvent(
     // "Other" row (no sourceId) is re-priced to the recomputed residual.
     const otherFair = buildMemberSpecs(ev, type).find((s) => s.sourceId == null)?.fair ?? 1;
     const bySource = new Map(ev.markets.map((lm) => [lm.id, lm]));
+    let refreshedHist = 0;
     for (const m of existing) {
       if (store.settlement.isSettled(m.id)) continue;
       if (!m.sourceId) { requote(store, m.id, otherFair); continue; }
       const lm = bySource.get(m.sourceId);
       requote(store, m.id, lm ? fairYesFromLive(lm, 1) : 1);
+      // also pull real price history so the chart isn't stuck on the old flat seed
+      if (await seedHistory(store, m.id, lm?.yesTokenId, m.sourceId, lm ? fairYesFromLive(lm, 1) : 1)) refreshedHist++;
     }
+    console.log(`[augora] re-import ${groupId}: refreshed ${existing.length} members, ${refreshedHist} got real history`);
     return { groupId, type, markets: existing, event: ev };
   }
 
@@ -268,6 +291,7 @@ export async function importLiveEvent(
   if (have < need) store.ledger.deposit(MM, need - have);
 
   let i = 0;
+  let realCount = 0;
   for (const sp of specs) {
     const id = `${groupId}-${i++}`;
     const market: Market = {
@@ -293,11 +317,12 @@ export async function importLiveEvent(
     } catch {
       /* leave this option with a thin/empty book; market still exists */
     }
-    await seedHistory(store, id, sp.yesTokenId, sp.fair);
+    if (await seedHistory(store, id, sp.yesTokenId, sp.sourceId, sp.fair)) realCount++;
     store.recordPrice(id);
     created.push(market);
   }
 
+  console.log(`[augora] import ${groupId}: ${realCount}/${created.length} members got real Polymarket history`);
   return { groupId, type, markets: created, event: ev };
 }
 
