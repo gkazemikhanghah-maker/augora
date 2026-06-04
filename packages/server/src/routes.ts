@@ -188,19 +188,27 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
   // ---- GROUP strategy: legs spanning MULTIPLE members of one group ----
   // Atomic across markets: every market leg must fill and total cost must fit,
   // else nothing commits. This is what lets users build real cross-strike spreads.
-  type GroupLeg = { marketId: string; side: Side; type: OrderType; priceCents?: number; qty: number };
+  type GroupLeg = { marketId: string; side: Side; type: OrderType; priceCents?: number; qty: number; intent?: "buy" | "write" };
 
   const previewGroup = (legs: GroupLeg[]) => {
-    const byMarket = new Map<string, LegInput[]>();
-    for (const l of legs) {
-      if (!byMarket.has(l.marketId)) byMarket.set(l.marketId, []);
-      byMarket.get(l.marketId)!.push({ side: l.side, type: l.type, priceCents: l.priceCents, qty: l.qty });
-    }
+    const buyByMarket = new Map<string, LegInput[]>();
     let allMarketFilled = true;
     let totalCollateralCents = 0;
     let totalFeeCents = 0;
-    const perMarket: Record<string, ReturnType<MatchingEngine["previewMultiLeg"]>> = {};
-    for (const [mid, ls] of byMarket) {
+    const perMarket: Record<string, ReturnType<MatchingEngine["previewMultiLeg"]> | ReturnType<MatchingEngine["previewWrite"]>> = {};
+    for (const l of legs) {
+      if (l.intent === "write") {
+        const p = store.engine(l.marketId).previewWrite(l.qty); // full collateral, checks YES-bid depth
+        perMarket[l.marketId] = p;
+        allMarketFilled &&= p.allMarketFilled;
+        totalCollateralCents += p.totalCollateralCents;
+        totalFeeCents += p.totalFeeCents;
+      } else {
+        if (!buyByMarket.has(l.marketId)) buyByMarket.set(l.marketId, []);
+        buyByMarket.get(l.marketId)!.push({ side: l.side, type: l.type, priceCents: l.priceCents, qty: l.qty });
+      }
+    }
+    for (const [mid, ls] of buyByMarket) {
       const p = store.engine(mid).previewMultiLeg(ls);
       perMarket[mid] = p;
       allMarketFilled &&= p.allMarketFilled;
@@ -253,13 +261,15 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
       // 4) commit — single-threaded, so what preview validated is what executes
       const executed = legs.map((leg) => ({
         marketId: leg.marketId,
-        ...store.engine(leg.marketId).submit({
-          userId,
-          side: leg.side,
-          type: leg.type,
-          priceCents: leg.priceCents,
-          qty: leg.qty,
-        }),
+        ...(leg.intent === "write"
+          ? store.engine(leg.marketId).write({ userId, qty: leg.qty })
+          : store.engine(leg.marketId).submit({
+              userId,
+              side: leg.side,
+              type: leg.type,
+              priceCents: leg.priceCents,
+              qty: leg.qty,
+            })),
       }));
       const touched = [...new Set(legs.map((l) => l.marketId))];
       for (const mid of touched) {

@@ -420,6 +420,27 @@ export class MatchingEngine {
    * legs see depth already taken by earlier legs. Used for atomic execution:
    * the route commits only if every market leg is fully fillable.
    */
+  /** Preview a market WRITE of `qty` YES: checks resting YES-bid depth and
+   *  reports the FULL collateral the writer must post (100¢/contract). */
+  previewWrite(qty: number): { allMarketFilled: boolean; totalCollateralCents: Cents; totalFeeCents: Cents } {
+    const book = this.bidsYES
+      .map((r) => ({ price: r.order.priceCents, remaining: r.remaining, seq: r.seq }))
+      .sort((a, b) => b.price - a.price || a.seq - b.seq);
+    let remaining = qty;
+    let fee = 0;
+    for (const maker of book) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, maker.remaining);
+      fee += feeCents(take, (100 - maker.price) / 100, this.market.feeMult);
+      remaining -= take;
+    }
+    return {
+      allMarketFilled: qty - remaining === qty,
+      totalCollateralCents: 100 * qty, // cash-secured: full notional locked
+      totalFeeCents: fee,
+    };
+  }
+
   previewMultiLeg(legs: LegInput[]): MultiLegPreview {
     const copy = (book: RestingOrder[]) =>
       book.map((r) => ({ price: r.order.priceCents, remaining: r.remaining, seq: r.seq }));

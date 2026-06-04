@@ -7,6 +7,7 @@ export interface GroupLeg {
   type: OrderType;
   priceCents?: number;
   qty: number;
+  intent?: "buy" | "write";
 }
 export interface GroupPreview {
   perMarket: Record<string, MultiLegPreview>;

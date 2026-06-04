@@ -62,7 +62,13 @@ export default function PortfolioPage() {
                   </span>
                 )}
               </span>
-              <span style={{ color: p.side === "YES" ? "var(--green)" : "var(--red)" }}>{p.side}</span>
+              {p.written ? (
+                <span className="text-[11px]" style={{ color: "var(--red)" }} title="Written short: premium collected, $1/contract collateral blocked">
+                  SHORT YES
+                </span>
+              ) : (
+                <span style={{ color: p.side === "YES" ? "var(--green)" : "var(--red)" }}>{p.side}</span>
+              )}
               <span>{p.qty}</span>
               <span>{centsPrice(p.avgPriceCents / 100)}</span>
               <span>{p.markCents == null ? "—" : centsPrice(p.markCents / 100)}</span>

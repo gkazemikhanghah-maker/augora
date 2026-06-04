@@ -51,11 +51,11 @@ export function LongShortBuilder({
     try {
       const legs: GroupLeg[] = [
         { marketId: longId, side: "YES", type: "market", qty: QTY },
-        { marketId: againstId, side: "NO", type: "market", qty: QTY },
+        { marketId: againstId, side: "YES", type: "market", qty: QTY, intent: "write" }, // native cash-secured short
       ];
       const { executed } = await api.executeStrategyGroup(legs);
       const filled = executed.reduce((s, e) => s + e.trades.reduce((t, x) => t + x.qty, 0), 0);
-      setMsg({ ok: true, text: `✓ Relative bet executed atomically · ${filled} contracts filled` });
+      setMsg({ ok: true, text: `✓ Relative bet executed atomically · ${filled} contracts · short leg written` });
       onExecuted?.();
     } catch (e) {
       setMsg({ ok: false, text: `✗ ${(e as Error).message}` });
@@ -122,8 +122,8 @@ export function LongShortBuilder({
           {busy ? "Executing…" : "Execute relative bet (2 legs)"}
         </button>
         <div className="mt-2 px-1 text-[10.5px] leading-[1.5] text-muted">
-          Same economics either way. On this demo (running on a peer order book) the short leg fills as its net-equivalent Buy-No;
-          the standalone exchange books it natively as premium received + collateral blocked.
+          The short leg executes as a native cash-secured Write: you collect the premium and block $1/contract of collateral
+          (settled from your collateral if it wins). It shows up as a written short in your Portfolio.
         </div>
         {msg && (
           <div className={`mt-3 rounded-lg px-3 py-2 text-[12.5px] ${msg.ok ? "bg-[#eef7ee] text-green" : "bg-[#fbeeee] text-red"}`}>
