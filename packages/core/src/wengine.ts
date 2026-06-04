@@ -59,14 +59,17 @@ export function wMetrics(w: WVector, atoms: Atom[]): WMetrics {
   const maxW = Math.max(...coeffs);
 
   const byAtom = atoms.map((a) => ({ id: a.id, pnl: (w[a.id] ?? 0) - cost }));
-  const isDigital = coeffs.every((c) => c === 0 || c === 1);
+  // digital ⇔ every leg pays the same nonzero amount (e.g. {0, Q}); then the
+  // break-even is a *probability* = cost / Q. Mixed-sign (long-short) ⇒ none.
+  const nonzero = coeffs.filter((c) => c !== 0);
+  const uniformPos = nonzero.length > 0 && nonzero.every((c) => c === nonzero[0]) && nonzero[0]! > 0;
 
   return {
     cost,
     maxProfit: maxW - cost,
     maxLoss: cost - minW,
     collateral: Math.max(0, -minW),
-    breakevenProb: isDigital ? cost : null,
+    breakevenProb: uniformPos ? cost / nonzero[0]! : null,
     byAtom,
   };
 }

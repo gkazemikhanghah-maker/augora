@@ -1,13 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
-import { groupPayoff, type GroupLegCalc } from "@augora/core";
+import { wMetrics, type GroupLegCalc } from "@augora/core";
 import { api, money, centsPrice, timeToExpiry, type MarketView, type GroupLeg } from "@/lib/api";
 
 type Pick = "YES" | "NO" | null;
-const FEES: Array<[number, string]> = [
-  [0, "None"],
-  [0.07, "Standard"],
-];
 
 /** Strategy builder for a mutually-exclusive group (categorical / buckets).
  *  Each member can be a Buy-YES or Buy-NO leg; the basket executes atomically. */
@@ -26,7 +22,6 @@ export function GroupStrategyBuilder({
     [group],
   );
   const [legs, setLegs] = useState<Record<string, { pick: Pick; qty: number }>>({});
-  const [feeMult, setFeeMult] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -88,11 +83,24 @@ export function GroupStrategyBuilder({
     [members, legs],
   );
 
-  const payoff = useMemo(
-    () => groupPayoff(calcLegs, members.map((m) => m.id), feeMult),
-    [calcLegs, members, feeMult],
-  );
-  const scenarioById = new Map(payoff.scenarios.map((s) => [s.winnerId, s.pnl]));
+  // ---- risk via the universal w-engine (atoms = members; one resolves YES) ----
+  const atomList = useMemo(() => members.map((m) => ({ id: m.id, price: yesPrice(m) })), [members]);
+  const wVec = useMemo(() => {
+    const w: Record<string, number> = {};
+    for (const m of members) {
+      const leg = legs[m.id];
+      if (!leg?.pick || !(leg.qty > 0)) continue;
+      if (leg.pick === "YES") w[m.id] = (w[m.id] ?? 0) + leg.qty;
+      else for (const o of members) if (o.id !== m.id) w[o.id] = (w[o.id] ?? 0) + leg.qty; // Buy-NO ≡ +qty on every other atom
+    }
+    return w;
+  }, [members, legs]);
+  const wm = useMemo(() => wMetrics(wVec, atomList), [wVec, atomList]);
+  const nLegs = calcLegs.length;
+  // gross capital actually locked = sum of leg premiums (+ collateral once Write exists)
+  const grossCapital = calcLegs.reduce((s, l) => s + l.qty * l.entry, 0) + wm.collateral;
+  const scenarioById = new Map(wm.byAtom.map((b) => [b.id, b.pnl]));
+  const payoff = { capital: grossCapital, maxP: wm.maxProfit, maxL: -wm.maxLoss, nLegs };
 
   const head = members[0];
   const typeLabel = head?.type === "ladder" ? "Ladder" : head?.type === "categorical" ? "Categorical" : "Grouped";
@@ -165,16 +173,6 @@ export function GroupStrategyBuilder({
               <span className="font-semibold text-red">No</span> to bet against it. Combine several to build a spread that
               wins across a range. Every position is fully collateralized — your max loss is what you pay, never more.
             </div>
-          </div>
-          <div className="flex shrink-0 gap-1">
-            {FEES.map(([v, lab]) => (
-              <button key={lab} onClick={() => setFeeMult(v)}
-                className={`rounded-md border px-[11px] py-[7px] font-mono text-[11px] font-semibold transition ${
-                  feeMult === v ? "border-ink bg-ink text-bg" : "border-line bg-white text-muted"
-                }`}>
-                {lab}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -264,11 +262,30 @@ export function GroupStrategyBuilder({
       <div className="rounded-2xl border border-line bg-card p-[22px] shadow-soft">
         <div className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">Cost &amp; risk</div>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[13px] border border-line bg-line">
-          <Stat label="Capital (est.)" value={money(payoff.capital)} />
-          <Stat label="Legs" value={String(payoff.nLegs)} sm />
-          <Stat label="Max profit" value={money(payoff.maxP)} color="var(--green)" />
-          <Stat label="Max loss" value={money(payoff.maxL)} color="var(--red)" />
+          <Stat label="Net cost" value={money(wm.cost)} />
+          <Stat label="Collateral" value={money(wm.collateral)} sm />
+          <Stat label="Max profit" value={money(wm.maxProfit)} color="var(--green)" />
+          <Stat label="Max loss" value={money(wm.maxLoss)} color="var(--red)" />
         </div>
+        {nLegs > 0 && (
+          <div className="mt-2 flex items-center justify-between rounded-[10px] bg-[#f7f5ef] px-3 py-2 text-[11.5px]">
+            <span className="text-muted">
+              {wm.breakevenProb != null ? "Break-even probability" : "Relative position"}
+            </span>
+            <span className="font-mono font-semibold tabular-nums">
+              {wm.breakevenProb != null
+                ? `${(wm.breakevenProb * 100).toFixed(1)}%`
+                : `${nLegs} legs · ${money(payoff.capital)} locked`}
+            </span>
+          </div>
+        )}
+        {wm.breakevenProb != null && nLegs > 0 && (
+          <div className="mt-1.5 px-1 text-[11px] leading-[1.5] text-muted">
+            +EV only if the real chance of these outcomes exceeds{" "}
+            <span className="font-semibold text-ink">{(wm.breakevenProb * 100).toFixed(1)}%</span>. Gross capital locked{" "}
+            {money(payoff.capital)} — net risk {money(wm.maxLoss)}.
+          </div>
+        )}
 
         <div className="mb-2 mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">
           {orderable ? "P&L across the range" : "P&L by winning outcome"}

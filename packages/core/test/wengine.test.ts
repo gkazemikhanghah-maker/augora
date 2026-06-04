@@ -3,6 +3,7 @@ import {
   wMetrics, buildSingle, buildBasket, buildCorridor, buildThreshold, buildLongShort,
   addW, scaleW, type Atom,
 } from "../src/wengine.js";
+import { groupPayoff } from "../src/calc.js";
 
 // peace-deal-style CUMULATIVE market reduced to MECE atoms (the windows):
 //   atom0 = "by 2026", atom1 = "2027 window", atom2 = "2028 window", atom3 = "never"
@@ -85,4 +86,46 @@ describe("w-engine universal metrics", () => {
   it("empty corridor throws", () => {
     expect(() => buildCorridor(atoms, 2, 1)).toThrow();
   });
+});
+
+describe("w-engine ⟷ groupPayoff parity (shadow-mode, MECE atoms)", () => {
+  // categorical {A,B,C} with prices summing to 1 (a proper MECE partition)
+  const cat: Atom[] = [
+    { id: "A", price: 0.5 },
+    { id: "B", price: 0.3 },
+    { id: "C", price: 0.2 },
+  ];
+  // legs → w: Buy-YES(i) adds qty to atom i; Buy-NO(i) adds qty to every other atom
+  function legsToW(legs: { id: string; pick: "YES" | "NO"; qty: number }[]): Record<string, number> {
+    const w: Record<string, number> = {};
+    for (const l of legs)
+      if (l.pick === "YES") w[l.id] = (w[l.id] ?? 0) + l.qty;
+      else for (const a of cat) if (a.id !== l.id) w[a.id] = (w[a.id] ?? 0) + l.qty;
+    return w;
+  }
+  const price = (id: string) => cat.find((a) => a.id === id)!.price;
+
+  for (const legs of [
+    [{ id: "A", pick: "YES" as const, qty: 100 }],
+    [{ id: "B", pick: "NO" as const, qty: 100 }],
+    [{ id: "A", pick: "YES" as const, qty: 100 }, { id: "B", pick: "YES" as const, qty: 100 }],
+    [{ id: "A", pick: "YES" as const, qty: 100 }, { id: "C", pick: "NO" as const, qty: 50 }],
+  ]) {
+    it(`matches for ${JSON.stringify(legs)}`, () => {
+      const wm = wMetrics(legsToW(legs), cat);
+      const gp = groupPayoff(
+        legs.map((l) => ({ memberId: l.id, side: l.pick, dir: "long" as const, qty: l.qty, entry: l.pick === "YES" ? price(l.id) : 1 - price(l.id) })),
+        cat.map((a) => a.id),
+        0,
+      );
+      // per-outcome P&L must agree atom-by-atom
+      for (const a of cat) {
+        const wmPnl = wm.byAtom.find((x) => x.id === a.id)!.pnl;
+        const gpPnl = gp.scenarios.find((s) => s.winnerId === a.id)!.pnl;
+        expect(wmPnl).toBeCloseTo(gpPnl, 6);
+      }
+      expect(wm.maxLoss).toBeCloseTo(-gp.maxL, 6); // gp.maxL is signed (min pnl)
+      expect(wm.maxProfit).toBeCloseTo(gp.maxP, 6);
+    });
+  }
 });
