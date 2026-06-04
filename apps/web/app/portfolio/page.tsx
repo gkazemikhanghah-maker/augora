@@ -22,7 +22,12 @@ export default function PortfolioPage() {
   if (!balance || !positions) return <Note>Loading…</Note>;
 
   const totalUnreal = positions.reduce((s, p) => s + p.unrealizedPnlCents, 0);
-  const equity = balance.balanceCents + balance.lockedCents;
+  // equity = cash + collateral + marked value of still-open positions
+  const openValue = positions.reduce(
+    (s, p) => s + (!p.settled && p.markCents != null ? p.qty * p.markCents : 0),
+    0,
+  );
+  const equity = balance.balanceCents + balance.lockedCents + openValue;
 
   return (
     <div className="pt-4">

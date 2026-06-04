@@ -75,9 +75,9 @@ export function LongShortBuilder({
         </div>
         <div className="mt-1.5 text-[15px] font-bold leading-snug tracking-[-0.01em]">{title}</div>
         <div className="mt-1 text-[12px] leading-[1.55] text-muted">
-          Bet that one outcome beats another. We build it as Buy-<span className="font-semibold text-green">Yes</span> on the one
-          you back plus Buy-<span className="font-semibold text-red">No</span> on the one you fade — Augora has no naked short, but
-          this pair gives the identical relative payoff, fully collateralized.
+          Bet that one outcome beats another. We back one with a Buy-<span className="font-semibold text-green">Yes</span> and
+          fade the other with a native cash-secured <span className="font-semibold text-red">Write</span> — you collect that
+          premium and block $1/contract of collateral. Fully collateralized: your loss is capped, never a margin call.
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3">
