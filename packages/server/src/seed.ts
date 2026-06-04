@@ -66,10 +66,10 @@ export function seed(store: Store): void {
   // 2) LADDER (dated) — "صلحِ ایران و آمریکا تا تاریخِ X". Cumulative: later date ≥
   //    earlier date. Prices must be monotone non-decreasing and NOT sum to 1.
   const ladderGroup = "IRAN-US-PEACE";
-  const ladder: Array<{ id: string; label: string; days: number; fair: number }> = [
-    { id: "PEACE-2026Q3", label: "by end of Q3 2026", days: 120, fair: 18 },
-    { id: "PEACE-2026EOY", label: "by end of 2026", days: 215, fair: 31 },
-    { id: "PEACE-2027EOY", label: "by end of 2027", days: 580, fair: 52 },
+  const ladder: Array<{ id: string; label: string; short: string; days: number; fair: number }> = [
+    { id: "PEACE-2026Q3", label: "by end of Q3 2026", short: "Q3 2026", days: 120, fair: 18 },
+    { id: "PEACE-2026EOY", label: "by end of 2026", short: "end of 2026", days: 215, fair: 31 },
+    { id: "PEACE-2027EOY", label: "by end of 2027", short: "end of 2027", days: 580, fair: 52 },
   ];
   for (const l of ladder) {
     const m = mkMarket({
@@ -77,6 +77,7 @@ export function seed(store: Store): void {
       question: `Iran\u2013US peace deal ${l.label}?`,
       type: "ladder",
       groupId: ladderGroup,
+      orderLabel: l.short,
       orderingType: "INTERVAL",
       representation: "CUMULATIVE",
       axisDirection: "INCREASING",

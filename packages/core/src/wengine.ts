@@ -160,7 +160,7 @@ export function deriveCumulativeAtoms(rungs: Rung[]): WindowAtom[] {
     const lo = k === 0 ? 0 : r[k - 1]!.cumPrice;
     const hi = k === n ? 1 : r[k]!.cumPrice;
     const label =
-      k === 0 ? `${r[0]!.label}` : k === n ? `after ${r[n - 1]!.label}` : `${r[k - 1]!.label} → ${r[k]!.label}`;
+      k === 0 ? `by ${r[0]!.label}` : k === n ? `after ${r[n - 1]!.label}` : `${r[k - 1]!.label} → ${r[k]!.label}`;
     atoms.push({ id: `win_${k}`, index: k, price: Math.max(0, hi - lo), label });
   }
   return atoms;
