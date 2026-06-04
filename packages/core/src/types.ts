@@ -45,6 +45,16 @@ export interface Market {
   orderValue?: number;
   orderKind?: "number" | "date";
   orderLabel?: string;
+  /** Spread-engine taxonomy (addendum v1.1). `orderingType` says whether a
+   *  corridor is even meaningful; `representation` says how it's built (atoms
+   *  vs cumulative thresholds); `axisDirection` disambiguates "wider" for
+   *  cumulative markets. Set once at import (heuristic + human confirm) and then
+   *  stored — never re-guessed at runtime. Absent ⇒ structured products off. */
+  orderingType?: "NOMINAL" | "ORDINAL" | "INTERVAL";
+  representation?: "ATOMIC" | "CUMULATIVE";
+  axisDirection?: "INCREASING" | "DECREASING";
+  /** Human-confirmed the taxonomy above (safety gate for corridor products). */
+  taxonomyConfirmed?: boolean;
 }
 
 export type OrderType = "limit" | "market";
