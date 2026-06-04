@@ -83,6 +83,26 @@ describe("w-engine universal metrics", () => {
     expect(m.collateral).toBe(1);
   });
 
+  it("long-short via Buy-YES(A)+Buy-NO(C) is identical in P&L to the spec short w=[+1,0,−1]", () => {
+    const cat: Atom[] = [
+      { id: "A", price: 0.4 },
+      { id: "B", price: 0.35 },
+      { id: "C", price: 0.25 },
+    ];
+    // Augora replication: Buy-YES(A) adds +1 to A; Buy-NO(C) adds +1 to every atom ≠ C
+    const rep: Record<string, number> = { A: 1 };
+    for (const a of cat) if (a.id !== "C") rep[a.id] = (rep[a.id] ?? 0) + 1;
+    const mr = wMetrics(rep, cat);
+    const ml = wMetrics(buildLongShort("A", "C"), cat);
+    for (const a of cat) {
+      const r = mr.byAtom.find((x) => x.id === a.id)!.pnl;
+      const l = ml.byAtom.find((x) => x.id === a.id)!.pnl;
+      expect(r).toBeCloseTo(l, 6); // same payoff in every outcome
+    }
+    expect(mr.maxLoss).toBeCloseTo(ml.maxLoss, 6);
+    expect(mr.maxProfit).toBeCloseTo(ml.maxProfit, 6);
+  });
+
   it("empty corridor throws", () => {
     expect(() => buildCorridor(atoms, 2, 1)).toThrow();
   });

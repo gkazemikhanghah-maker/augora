@@ -10,6 +10,7 @@ import type { Side, Trade } from "@augora/core";
 import { StrategyBuilder } from "@/components/StrategyBuilder";
 import { GroupStrategyBuilder } from "@/components/GroupStrategyBuilder";
 import { CorridorBuilder } from "@/components/CorridorBuilder";
+import { LongShortBuilder } from "@/components/LongShortBuilder";
 import { QuickTrade } from "@/components/QuickTrade";
 import { ResolvePanel } from "@/components/ResolvePanel";
 import { OutcomeRows } from "@/components/OutcomeRows";
@@ -40,7 +41,7 @@ function MarketDetail() {
   const [balance, setBalance] = useState<{ balanceCents: number; lockedCents: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [flash, setFlash] = useState<"up" | "down" | null>(null);
-  const [tab, setTab] = useState<"trade" | "strategy" | "spread">("trade");
+  const [tab, setTab] = useState<"trade" | "strategy" | "spread" | "relative">("trade");
   const wsRef = useRef<WebSocket | null>(null);
 
   const refreshAccount = useCallback(() => {
@@ -107,6 +108,7 @@ function MarketDetail() {
   const yesPrice = price ?? market.priceCents;
   const group = siblings.filter((m) => m.groupId === market.groupId);
   const multi = group.length > 1;
+  const isNominal = group[0]?.orderingType === "NOMINAL" || group[0]?.type === "categorical";
   const change = history.length > 1 && history[0]!.midCents ? ((history[history.length - 1]!.midCents - history[0]!.midCents) / history[0]!.midCents) * 100 : 0;
   const groupTitle = market.groupTitle ?? (market.groupId === "NOMINEE-2028" ? "2028 Nominee" : market.groupId === "IRAN-US-PEACE" ? "US × Iran peace deal" : market.question);
 
@@ -116,12 +118,13 @@ function MarketDetail() {
 
       {/* tabs */}
       <div className="mt-3 flex items-center gap-1 border-b border-line">
-        {(([["trade", "Trade"], ["strategy", "Strategy"], ...(multi ? [["spread", "Spread"]] : [])]) as [("trade" | "strategy" | "spread"), string][]).map(([k, label]) => (
+        {(([["trade", "Trade"], ["strategy", "Strategy"], ...(multi ? [["spread", "Spread"]] : []), ...(multi && isNominal ? [["relative", "Relative"]] : [])]) as [("trade" | "strategy" | "spread" | "relative"), string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`-mb-px border-b-2 px-4 py-2.5 text-[13.5px] font-semibold transition ${tab === k ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}>
             {label}
             {k === "strategy" && <span className="ml-1.5 rounded bg-green-soft px-1.5 py-0.5 text-[9px] font-bold uppercase text-green">Pro</span>}
             {k === "spread" && <span className="ml-1.5 rounded bg-ink/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted">New</span>}
+            {k === "relative" && <span className="ml-1.5 rounded bg-[#f3eefb] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#7d5bbe]">Test</span>}
           </button>
         ))}
       </div>
@@ -213,6 +216,14 @@ function MarketDetail() {
           ) : (
             <GroupStrategyBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
           )}
+        </div>
+      ) : tab === "relative" ? (
+        <div className="mt-5">
+          <div className="mb-3 flex items-baseline gap-3">
+            <h2 className="text-[20px] font-extrabold tracking-[-0.02em]">Relative bet</h2>
+            <span className="text-[12.5px] text-muted">Back one outcome, fade another — isolated test of long/short.</span>
+          </div>
+          <LongShortBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
         </div>
       ) : (
         <div className="mt-5">
