@@ -27,13 +27,12 @@ export function LongShortBuilder({
   const same = longId === againstId;
 
   const atoms: Atom[] = useMemo(() => members.map((m) => ({ id: m.id, price: (m.priceCents ?? 50) / 100 })), [members]);
+  // TRUE long-short per spec: w[long]=+1, w[short]=−1 (a real Write leg). The
+  // w-engine prices this natively — net cost can be a credit, collateral = $100.
   const w = useMemo(() => {
-    const ww: Record<string, number> = {};
-    if (same) return ww;
-    ww[longId] = (ww[longId] ?? 0) + QTY;                 // Buy-YES(long)
-    for (const m of members) if (m.id !== againstId) ww[m.id] = (ww[m.id] ?? 0) + QTY; // Buy-NO(against)
-    return ww;
-  }, [members, longId, againstId, same]);
+    if (same) return {} as Record<string, number>;
+    return { [longId]: QTY, [againstId]: -QTY };
+  }, [longId, againstId, same]);
   const wm = useMemo(() => wMetrics(w, atoms), [w, atoms]);
 
   const priceOf = (id: string) => (group.find((x) => x.id === id)?.priceCents ?? 50) / 100;
@@ -108,11 +107,11 @@ export function LongShortBuilder({
             <div className="mt-1.5 flex flex-col gap-1 font-mono text-[12.5px]">
               <div className="flex items-center justify-between">
                 <span>Buy-<span className="font-semibold text-green">YES</span> <span className="text-ink">{longLbl}</span></span>
-                <span className="text-muted">{Math.round(priceOf(longId) * 100)}¢</span>
+                <span className="text-muted">pay {Math.round(priceOf(longId) * 100)}¢</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Buy-<span className="font-semibold text-red">NO</span> <span className="text-ink">{againstLbl}</span></span>
-                <span className="text-muted">{Math.round((1 - priceOf(againstId)) * 100)}¢</span>
+                <span>Write-<span className="font-semibold text-red">YES</span> <span className="text-ink">{againstLbl}</span></span>
+                <span className="text-muted">get {Math.round(priceOf(againstId) * 100)}¢ · block $1</span>
               </div>
             </div>
           </div>
@@ -122,6 +121,10 @@ export function LongShortBuilder({
           className="mt-4 w-full rounded-xl bg-ink py-3 text-[13.5px] font-semibold text-bg transition disabled:opacity-40">
           {busy ? "Executing…" : "Execute relative bet (2 legs)"}
         </button>
+        <div className="mt-2 px-1 text-[10.5px] leading-[1.5] text-muted">
+          Same economics either way. On this demo (running on a peer order book) the short leg fills as its net-equivalent Buy-No;
+          the standalone exchange books it natively as premium received + collateral blocked.
+        </div>
         {msg && (
           <div className={`mt-3 rounded-lg px-3 py-2 text-[12.5px] ${msg.ok ? "bg-[#eef7ee] text-green" : "bg-[#fbeeee] text-red"}`}>
             {msg.text}
@@ -132,14 +135,16 @@ export function LongShortBuilder({
       <div className="rounded-2xl border border-line bg-card p-[22px] shadow-soft">
         <div className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">Cost &amp; risk</div>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[13px] border border-line bg-line">
-          <Stat label="Cost (locked)" value={money(cost)} />
-          <Stat label="Outcomes" value={String(members.length)} sm />
+          <Stat label={cost < 0 ? "Credit received" : "Net debit"} value={money(Math.abs(cost))} color={cost < 0 ? "var(--green)" : undefined} />
+          <Stat label="Collateral blocked" value={money(wm.collateral)} sm />
           <Stat label="Max profit" value={money(wm.maxProfit)} color="var(--green)" />
           <Stat label="Max loss" value={money(wm.maxLoss)} color="var(--red)" />
         </div>
         <div className="mt-2 rounded-[10px] bg-[#f7f5ef] px-3 py-2 text-[11.5px] leading-[1.5] text-muted">
-          A relative position — you do best if <span className="font-semibold text-green">{longLbl}</span> wins and worst if{" "}
-          <span className="font-semibold text-red">{againstLbl}</span> wins. Fully collateralized: max loss is the {money(cost)} you put up.
+          A relative position — best if <span className="font-semibold text-green">{longLbl}</span> wins, worst if{" "}
+          <span className="font-semibold text-red">{againstLbl}</span> wins. The short leg is a Write: you{" "}
+          {cost < 0 ? "collect a net credit" : "pay a small net debit"} and block {money(wm.collateral)} collateral, so total at
+          risk is {money(wm.maxLoss)} — never more.
         </div>
 
         <div className="mb-2 mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">P&amp;L by winning outcome</div>

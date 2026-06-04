@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </span>
               <span className="text-[18px] font-bold tracking-[-0.02em]">Augora</span>
               <span className="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-muted" title="build marker">
-                build 21 · relative-tab
+                build 22 · true-write-framing
               </span>
             </Link>
             <nav className="hidden items-center gap-5 text-[13px] font-medium text-muted md:flex">
