@@ -129,6 +129,20 @@ export class Ledger {
     );
   }
 
+  /** Native write: a resting buyer's locked premium is paid to the writer
+   *  (instead of into escrow). Escrow is funded fully by the writer's collateral
+   *  via balanceToEscrow, so the pair stays 100% backed. */
+  premiumPayout(buyerId: string, writerId: string, cents: Cents, refId?: string): void {
+    if (cents === 0) return;
+    this.post(
+      [
+        { accountId: lockedId(buyerId), deltaCents: -cents, reason: "write-premium", refId },
+        { accountId: writerId, deltaCents: +cents, reason: "write-premium", refId },
+      ],
+      [lockedId(buyerId)],
+    );
+  }
+
   /** Settlement payout from escrow to a winning user. */
   payout(userId: string, marketId: string, cents: Cents, refId?: string): void {
     if (cents === 0) return;

@@ -71,6 +71,9 @@ export interface Order {
   filledQty: number;
   status: OrderStatus;
   ts: number;
+  /** "write" = a native short: writer funds full $1 collateral and collects the
+   *  premium from the buyer (a cash-secured written option). Absent ⇒ a buy. */
+  intent?: "buy" | "write";
 }
 
 export interface Trade {
@@ -91,6 +94,9 @@ export interface Position {
   qty: number;
   avgPriceCents: Cents; // volume-weighted avg entry, in cents
   realizedPnlCents: Cents;
+  /** True when this NO holding was opened by writing YES (a short). Economically
+   *  identical to a bought NO here, but surfaced for credit-spread display. */
+  written?: boolean;
 }
 
 export interface Account {

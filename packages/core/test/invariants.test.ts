@@ -137,3 +137,69 @@ describe("system invariants (spec §3) — end-to-end", () => {
     expect(led.account("alice").balanceCents).toBe(100_000);
   });
 });
+
+describe("native write (cash-secured short) — invariants", () => {
+  const M = "BTC-68K";
+  it("writer funds FULL collateral, collects premium, holds a written short; conserves & escrow drains", () => {
+    const led = new Ledger();
+    led.deposit("alice", 100_000); // buyer
+    led.deposit("bob", 100_000);   // writer
+    const eng = new MatchingEngine(binaryMarket(0), led);
+
+    // alice rests a YES bid @60¢ ×100 (locks $60)
+    eng.submit({ userId: "alice", side: "YES", type: "limit", priceCents: 60, qty: 100 });
+    expect(led.account("alice").lockedCents).toBe(6_000);
+
+    // bob WRITES YES ×100 (market): funds full $100/contract, collects 60¢ premium
+    const res = eng.write({ userId: "bob", qty: 100 });
+    expect(res.order.intent).toBe("write");
+    expect(res.order.filledQty).toBe(100);
+
+    // escrow fully funded (rule #2: 100¢/pair), and entirely by the writer
+    expect(led.bal(escrowId(M))).toBe(10_000);
+    // bob net = −$100 collateral + $60 premium = −$40 (same net as buy-NO @40¢)
+    expect(led.account("bob").balanceCents).toBe(96_000);
+    // alice's locked premium went to bob, not escrow
+    expect(led.account("alice").lockedCents).toBe(0);
+    expect(led.account("alice").balanceCents).toBe(94_000);
+
+    // position is surfaced as a written short (held as NO)
+    const bobPos = eng.allPositions().find((p) => p.userId === "bob")!;
+    expect(bobPos.side).toBe("NO");
+    expect(bobPos.written).toBe(true);
+    led.assertConservation(); // rule #1/#3
+
+    // settle YES: the YES buyer is paid from escrow; writer loses collateral
+    const settle = new SettlementService();
+    settle.settle(eng, led, "YES");
+    expect(led.bal(escrowId(M))).toBe(0); // rule #4 — escrow drains
+    expect(led.account("alice").balanceCents - 100_000).toBe(4_000);  // +$40
+    expect(led.account("bob").balanceCents - 100_000).toBe(-4_000);   // −$40
+    led.assertConservation();
+  });
+
+  it("writer keeps premium + collateral when the short wins (NO outcome)", () => {
+    const led = new Ledger();
+    led.deposit("alice", 100_000);
+    led.deposit("bob", 100_000);
+    const eng = new MatchingEngine(binaryMarket(0), led);
+    eng.submit({ userId: "alice", side: "YES", type: "limit", priceCents: 60, qty: 100 });
+    eng.write({ userId: "bob", qty: 100 });
+
+    new SettlementService().settle(eng, led, "NO");
+    expect(led.bal(escrowId(M))).toBe(0);
+    expect(led.account("bob").balanceCents - 100_000).toBe(6_000);   // +$60 (premium + collateral back)
+    expect(led.account("alice").balanceCents - 100_000).toBe(-6_000);
+    led.assertConservation();
+  });
+
+  it("FULL-COLLATERAL rule: a write needs the whole $100/contract upfront (stricter than buy-NO)", () => {
+    const led = new Ledger();
+    led.deposit("alice", 100_000);
+    led.deposit("bob", 5_000); // $50 — enough for the $40 net of a buy-NO, NOT for $100 collateral
+    const eng = new MatchingEngine(binaryMarket(0), led);
+    eng.submit({ userId: "alice", side: "YES", type: "limit", priceCents: 60, qty: 100 });
+    expect(() => eng.write({ userId: "bob", qty: 100 })).toThrow(); // blocked: full collateral unavailable
+    led.assertConservation();
+  });
+});

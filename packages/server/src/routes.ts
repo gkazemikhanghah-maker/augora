@@ -77,16 +77,18 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
 
   // ---- orders (buy = open/add, sell = close/short via buy-opposite + merge) ----
   app.post<{
-    Body: { market_id: string; side: Side; type: "limit" | "market"; price?: number; qty: number; action?: "buy" | "sell" };
+    Body: { market_id: string; side: Side; type: "limit" | "market"; price?: number; qty: number; action?: "buy" | "sell" | "write" };
   }>("/orders", async (req, reply) => {
     const userId = userOf(req);
     store.ensureUser(userId);
-    const { market_id, side, type, price, qty, action = "buy" } = req.body;
+    const { market_id, side, type, price, qty, action = "buy" } = req.body as typeof req.body & { action?: "buy" | "sell" | "write" };
     if (!store.markets.has(market_id)) return reply.code(404).send({ error: "market not found" });
     try {
       const eng = store.engine(market_id);
       const result =
-        action === "sell"
+        action === "write"
+          ? eng.write({ userId, qty })
+          : action === "sell"
           ? eng.sell({ userId, side, type, priceCents: price, qty })
           : eng.submit({ userId, side, type, priceCents: price, qty });
       if (result.trades.length) store.recordPrice(market_id);

@@ -214,6 +214,89 @@ export class MatchingEngine {
     return { order, trades: newTrades };
   }
 
+  private addWrittenPosition(userId: string, qty: number, priceCents: Cents): void {
+    this.addToPosition(userId, "NO", qty, priceCents); // short YES ≡ holding NO for settlement
+    const cur = this.positions.get(this.posKey(userId, "NO"));
+    if (cur) cur.written = true;
+  }
+
+  /**
+   * Native WRITE of YES (a cash-secured short), market order. The writer funds
+   * the FULL $1 collateral per contract into escrow and collects the resting
+   * buyer's premium directly — versus a buy-NO, where the buyer's premium funds
+   * escrow. Net balances/positions/escrow are identical (no-arbitrage), but the
+   * writer's cash flow is "receive premium + block collateral" and the position
+   * is surfaced as a written short. Invariants are preserved: every posting nets
+   * to zero, escrow holds exactly 100¢/pair, and settlement drains it.
+   */
+  write(input: { userId: string; qty: number }): { order: Order; trades: Trade[] } {
+    if (this.market.status !== "open") throw new Error("Market not open");
+    if (!Number.isInteger(input.qty) || input.qty <= 0) throw new Error("qty must be positive integer");
+
+    const order: Order = {
+      id: `O${++this.orderSeq}`,
+      marketId: this.market.id,
+      userId: input.userId,
+      side: "NO", // writer ends up holding NO (short YES)
+      type: "market",
+      priceCents: 99,
+      qty: input.qty,
+      filledQty: 0,
+      status: "open",
+      ts: this.now(),
+      intent: "write",
+    };
+
+    const newTrades: Trade[] = [];
+    const book = this.bidsYES; // resting YES buyers we provide YES to
+    this.sortBook(book);
+
+    let remaining = input.qty;
+    while (remaining > 0 && book.length > 0) {
+      const maker = book[0]!;
+      const makerPrice = maker.order.priceCents; // YES premium the buyer bid
+      const noPrice = 100 - makerPrice; // writer's effective cost basis
+      const take = Math.min(remaining, maker.remaining);
+
+      // native-write funding: writer posts FULL collateral, buyer's premium → writer
+      this.ledger.balanceToEscrow(input.userId, this.market.id, 100 * take, order.id);
+      this.ledger.premiumPayout(maker.order.userId, input.userId, makerPrice * take, order.id);
+      this.mintedPairs += take;
+
+      // symmetric fees (same basis as submit)
+      this.ledger.chargeFee(input.userId, feeCents(take, noPrice / 100, this.market.feeMult), order.id);
+      this.ledger.chargeFee(maker.order.userId, feeCents(take, makerPrice / 100, this.market.feeMult), maker.order.id);
+
+      // positions: buyer long YES, writer short YES (held as written NO)
+      this.addToPosition(maker.order.userId, "YES", take, makerPrice);
+      this.addWrittenPosition(input.userId, take, noPrice);
+
+      const trade: Trade = {
+        id: `T${++this.tradeSeq}`,
+        marketId: this.market.id,
+        makerOrderId: maker.order.id,
+        takerOrderId: order.id,
+        yesPriceCents: makerPrice,
+        qty: take,
+        ts: this.now(),
+      };
+      this.trades.push(trade);
+      newTrades.push(trade);
+
+      remaining -= take;
+      order.filledQty += take;
+      maker.remaining -= take;
+      maker.order.filledQty += take;
+      if (maker.remaining === 0) {
+        maker.order.status = "filled";
+        book.shift();
+      }
+    }
+
+    order.status = order.filledQty > 0 ? "filled" : "cancelled"; // market: no resting remainder
+    return { order, trades: newTrades };
+  }
+
   cancel(orderId: string): boolean {
     for (const book of [this.bidsYES, this.bidsNO]) {
       const i = book.findIndex((r) => r.order.id === orderId);
