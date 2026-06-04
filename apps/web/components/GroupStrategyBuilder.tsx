@@ -44,6 +44,35 @@ export function GroupStrategyBuilder({
   const setQty = (id: string, qty: number) =>
     setLegs((s) => ({ ...s, [id]: { pick: s[id]?.pick ?? null, qty: Math.max(0, qty) } }));
 
+  // ---- spread presets: pre-fill legs as a starting point; user can tweak ----
+  const isLadder = members[0]?.type === "ladder";
+  const rungs = useMemo(
+    () => [...group].filter((m) => m.orderValue != null).sort((a, b) => (a.orderValue ?? 0) - (b.orderValue ?? 0)),
+    [group],
+  );
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+
+  // Basket: back the top 3 outcomes to win — wins $1 if any of them does.
+  const applyBasket = () => {
+    const top = [...group].sort((a, b) => (b.priceCents ?? 0) - (a.priceCents ?? 0)).slice(0, 3);
+    const next: Record<string, { pick: Pick; qty: number }> = {};
+    top.forEach((m) => (next[m.id] = { pick: "YES", qty: 100 }));
+    setLegs(next);
+    setActivePreset("basket");
+    setMsg(null);
+  };
+  // Window (ladder only): Yes on the later rung + No on the nearer rung — wins
+  // only if the event lands in the gap between the two dates/levels.
+  const applyWindow = () => {
+    if (rungs.length < 2) return;
+    const near = rungs[0]!;
+    const far = rungs[1]!;
+    setLegs({ [far.id]: { pick: "YES", qty: 100 }, [near.id]: { pick: "NO", qty: 100 } });
+    setActivePreset("window");
+    setMsg(null);
+  };
+  const clearLegs = () => { setLegs({}); setActivePreset(null); setMsg(null); };
+
   // build calc legs from active picks
   const calcLegs: GroupLegCalc[] = useMemo(
     () =>
@@ -148,6 +177,32 @@ export function GroupStrategyBuilder({
             ))}
           </div>
         </div>
+
+        {/* spread presets — a starting point you can then tweak below */}
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-muted">Presets</span>
+          <button onClick={applyBasket}
+            className={`rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition ${activePreset === "basket" ? "border-ink bg-ink text-bg" : "border-line bg-white text-ink hover:border-ink"}`}>
+            Basket · back top 3
+          </button>
+          {isLadder && rungs.length >= 2 && (
+            <button onClick={applyWindow}
+              className={`rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition ${activePreset === "window" ? "border-ink bg-ink text-bg" : "border-line bg-white text-ink hover:border-ink"}`}>
+              Window · between two dates
+            </button>
+          )}
+          <button onClick={clearLegs}
+            className="rounded-full border border-line bg-white px-3 py-1.5 text-[11.5px] font-semibold text-muted transition hover:border-ink hover:text-ink">
+            Clear
+          </button>
+        </div>
+        {activePreset && (
+          <div className="mt-2 rounded-lg bg-[#f7f5ef] px-3 py-2 text-[11.5px] leading-[1.5] text-muted">
+            {activePreset === "basket"
+              ? "Backing the 3 most-likely outcomes. You win $1 if any one of them resolves Yes — cost is the sum of their Yes prices. Add or remove legs below."
+              : "A window bet: Yes on the later date + No on the nearer one. It pays only if the event happens between the two dates. Tweak which rungs below."}
+          </div>
+        )}
 
         <div className="mt-5 flex flex-col gap-2">
           {members.map((m) => {

@@ -8,6 +8,7 @@ import {
 } from "@/lib/api";
 import type { Side, Trade } from "@augora/core";
 import { StrategyBuilder } from "@/components/StrategyBuilder";
+import { GroupStrategyBuilder } from "@/components/GroupStrategyBuilder";
 import { QuickTrade } from "@/components/QuickTrade";
 import { ResolvePanel } from "@/components/ResolvePanel";
 import { OutcomeRows } from "@/components/OutcomeRows";
@@ -38,7 +39,7 @@ function MarketDetail() {
   const [balance, setBalance] = useState<{ balanceCents: number; lockedCents: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [flash, setFlash] = useState<"up" | "down" | null>(null);
-  const [tab, setTab] = useState<"trade" | "strategy">("trade");
+  const [tab, setTab] = useState<"trade" | "strategy" | "spread">("trade");
   const wsRef = useRef<WebSocket | null>(null);
 
   const refreshAccount = useCallback(() => {
@@ -114,11 +115,12 @@ function MarketDetail() {
 
       {/* tabs */}
       <div className="mt-3 flex items-center gap-1 border-b border-line">
-        {([["trade", "Trade"], ["strategy", "Strategy"]] as const).map(([k, label]) => (
+        {(([["trade", "Trade"], ["strategy", "Strategy"], ...(multi ? [["spread", "Spread"]] : [])]) as [("trade" | "strategy" | "spread"), string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`-mb-px border-b-2 px-4 py-2.5 text-[13.5px] font-semibold transition ${tab === k ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}>
             {label}
             {k === "strategy" && <span className="ml-1.5 rounded bg-green-soft px-1.5 py-0.5 text-[9px] font-bold uppercase text-green">Pro</span>}
+            {k === "spread" && <span className="ml-1.5 rounded bg-ink/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted">New</span>}
           </button>
         ))}
       </div>
@@ -198,6 +200,14 @@ function MarketDetail() {
               <ResolvePanel market={market} siblings={group} onSettled={refreshAccount} />
             </div>
           </div>
+        </div>
+      ) : tab === "spread" ? (
+        <div className="mt-5">
+          <div className="mb-3 flex items-baseline gap-3">
+            <h2 className="text-[20px] font-extrabold tracking-[-0.02em]">Build a spread</h2>
+            <span className="text-[12.5px] text-muted">Combine legs across outcomes — all fill together or nothing commits.</span>
+          </div>
+          <GroupStrategyBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
         </div>
       ) : (
         <div className="mt-5">
