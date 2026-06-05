@@ -1,4 +1,5 @@
 import type { Market, MarketType } from "@augora/core";
+import { suggestTaxonomy } from "@augora/core";
 import { Store } from "./store.js";
 import { getLiveMarket, getLiveEvent, liveGroupLabel, parseOrderKey, fetchLiveHistory, type LiveMarket, type LiveEvent } from "./livedata.js";
 
@@ -283,6 +284,13 @@ export async function importLiveEvent(
 
   const specs = buildMemberSpecs(ev, type);
 
+  // auto-detect spread taxonomy (suggestion only — a human confirms before any
+  // corridor product turns on). Binary markets need none.
+  const suggestion =
+    type === "binary"
+      ? null
+      : suggestTaxonomy(specs.map((s) => ({ label: s.label, priceCents: s.fair, orderValue: s.orderValue })));
+
   // fund the MM enough to back every quote, else a mid-loop quote hits the
   // negative-balance guard and aborts the import.
   const qty = specs.length > 40 ? 400 : specs.length > 12 ? 800 : 2000;
@@ -310,6 +318,14 @@ export async function importLiveEvent(
       category: ev.category,
       ...(sp.sourceId ? { sourceId: sp.sourceId, sourceSlug: sp.slug } : {}),
       ...(sp.orderValue != null ? { orderValue: sp.orderValue, orderKind: sp.orderKind, orderLabel: sp.orderLabel } : {}),
+      ...(suggestion
+        ? {
+            orderingType: suggestion.orderingType,
+            ...(suggestion.representation ? { representation: suggestion.representation } : {}),
+            ...(suggestion.axisDirection ? { axisDirection: suggestion.axisDirection } : {}),
+            taxonomyConfirmed: false, // human must confirm before corridor/credit products
+          }
+        : {}),
     };
     store.addMarket(market);
     try {

@@ -75,6 +75,24 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
     return { history: store.priceHistory.get(req.params.id) ?? [] };
   });
 
+  // ---- confirm a group's spread taxonomy (human-in-the-loop, addendum §6) ----
+  app.post<{
+    Params: { groupId: string };
+    Body: { orderingType: "NOMINAL" | "ORDINAL" | "INTERVAL"; representation?: "ATOMIC" | "CUMULATIVE"; axisDirection?: "INCREASING" | "DECREASING" };
+  }>("/markets/group/:groupId/taxonomy", async (req, reply) => {
+    const { groupId } = req.params;
+    const { orderingType, representation, axisDirection } = req.body;
+    const members = [...store.markets.values()].filter((m) => m.groupId === groupId);
+    if (members.length === 0) return reply.code(404).send({ error: "group not found" });
+    for (const m of members) {
+      m.orderingType = orderingType;
+      m.representation = orderingType === "NOMINAL" ? undefined : representation;
+      m.axisDirection = representation === "CUMULATIVE" ? axisDirection : undefined;
+      m.taxonomyConfirmed = true;
+    }
+    return { ok: true, updated: members.length };
+  });
+
   // ---- orders (buy = open/add, sell = close/short via buy-opposite + merge) ----
   app.post<{
     Body: { market_id: string; side: Side; type: "limit" | "market"; price?: number; qty: number; action?: "buy" | "sell" | "write" };

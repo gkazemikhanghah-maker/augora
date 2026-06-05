@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   wMetrics, buildSingle, buildBasket, buildCorridor, buildThreshold, buildLongShort,
-  addW, scaleW, deriveCumulativeAtoms, corridorLegsCumulative, type Atom,
+  addW, scaleW, deriveCumulativeAtoms, corridorLegsCumulative, suggestTaxonomy, type Atom,
 } from "../src/wengine.js";
 import { groupPayoff } from "../src/calc.js";
 
@@ -196,4 +196,47 @@ describe("w-engine ⟷ groupPayoff parity (shadow-mode, MECE atoms)", () => {
       expect(wm.maxProfit).toBeCloseTo(gp.maxP, 6);
     });
   }
+});
+
+describe("taxonomy auto-detection (suggestTaxonomy)", () => {
+  it("peace-deal thresholds → CUMULATIVE / INCREASING (even though prices sum ≈ 1)", () => {
+    const s = suggestTaxonomy([
+      { label: "Iran–US peace deal by end of Q3 2026?", priceCents: 18, orderValue: 1 },
+      { label: "Iran–US peace deal by end of 2026?", priceCents: 31, orderValue: 2 },
+      { label: "Iran–US peace deal by end of 2027?", priceCents: 52, orderValue: 3 },
+    ]);
+    expect(s.orderingType).toBe("INTERVAL");
+    expect(s.representation).toBe("CUMULATIVE");
+    expect(s.axisDirection).toBe("INCREASING");
+  });
+
+  it("descending threshold (≥ points) → CUMULATIVE / DECREASING", () => {
+    const s = suggestTaxonomy([
+      { label: "Over 1M", priceCents: 80, orderValue: 1 },
+      { label: "Over 2M", priceCents: 50, orderValue: 2 },
+      { label: "Over 3M", priceCents: 20, orderValue: 3 },
+    ]);
+    expect(s.representation).toBe("CUMULATIVE");
+    expect(s.axisDirection).toBe("DECREASING");
+  });
+
+  it("numeric buckets → ATOMIC", () => {
+    const s = suggestTaxonomy([
+      { label: "0–1 goals", priceCents: 30, orderValue: 0 },
+      { label: "2–3 goals", priceCents: 45, orderValue: 2 },
+      { label: "4+ goals", priceCents: 25, orderValue: 4 },
+    ]);
+    expect(s.orderingType).toBe("INTERVAL");
+    expect(s.representation).toBe("ATOMIC");
+  });
+
+  it("unordered outcomes → NOMINAL (no corridor)", () => {
+    const s = suggestTaxonomy([
+      { label: "Candidate A", priceCents: 38 },
+      { label: "Candidate B", priceCents: 31 },
+      { label: "Candidate C", priceCents: 19 },
+    ]);
+    expect(s.orderingType).toBe("NOMINAL");
+    expect(s.representation).toBeUndefined();
+  });
 });

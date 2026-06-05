@@ -139,6 +139,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  confirmTaxonomy: (
+    groupId: string,
+    body: { orderingType: "NOMINAL" | "ORDINAL" | "INTERVAL"; representation?: "ATOMIC" | "CUMULATIVE"; axisDirection?: "INCREASING" | "DECREASING" },
+  ) =>
+    req<{ ok: boolean; updated: number }>(`/markets/group/${encodeURIComponent(groupId)}/taxonomy`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   liveMarkets: () => req<{ markets: LiveMarket[] }>("/live/markets").then((r) => r.markets),
   liveMarket: (id: string) => req<LiveMarket>(`/live/markets/${encodeURIComponent(id)}`),
   liveEvents: () => req<{ events: LiveEvent[] }>("/live/events").then((r) => r.events),

@@ -133,6 +133,56 @@ export function scaleW(a: WVector, s: number): WVector {
   return out;
 }
 
+/* --------------------------- taxonomy detection --------------------------- *
+ * Suggest a market's spread taxonomy from its members at import time. This is a
+ * SUGGESTION only — a human confirms before any corridor product is enabled
+ * (addendum v1.1 §6). Per the honest caveat from review, the price-sum test is
+ * the weakest signal (nested thresholds can sum near 1, e.g. 18+31+52≈101), so
+ * label wording and price monotonicity are weighted higher.                    */
+export interface TaxonomySuggestion {
+  orderingType: "NOMINAL" | "ORDINAL" | "INTERVAL";
+  representation?: "ATOMIC" | "CUMULATIVE";
+  axisDirection?: "INCREASING" | "DECREASING";
+  reason: string;
+}
+
+export function suggestTaxonomy(
+  members: { label: string; priceCents: number; orderValue?: number }[],
+): TaxonomySuggestion {
+  const ordered = members.filter((m) => m.orderValue != null);
+  const hasOrder = ordered.length >= Math.max(2, Math.ceil(members.length * 0.6));
+  if (!hasOrder) {
+    return { orderingType: "NOMINAL", reason: "No natural order in the outcomes — basket / relative only, no corridor." };
+  }
+  const sorted = [...ordered].sort((a, b) => a.orderValue! - b.orderValue!);
+  const labels = members.map((m) => m.label.toLowerCase()).join(" | ");
+  const looksThreshold = /\b(by|over|under|above|below|at least|or more|or higher|or fewer|or less)\b|[<>]=?|≥|≤/.test(labels);
+  const looksBucket = /\d+\s*(?:[-–]|to)\s*\d+|\bbetween\b/.test(labels);
+
+  const prices = sorted.map((m) => m.priceCents);
+  let incr = 0, decr = 0;
+  for (let i = 1; i < prices.length; i++) {
+    if (prices[i]! > prices[i - 1]!) incr++;
+    else if (prices[i]! < prices[i - 1]!) decr++;
+  }
+  const monotonic = prices.length >= 2 && (incr === 0 || decr === 0);
+  const sumNear100 = Math.abs(members.reduce((s, m) => s + m.priceCents, 0) - 100) <= 8;
+
+  let cum = 0, atom = 0;
+  if (looksThreshold) cum += 3;
+  if (looksBucket) atom += 3;
+  if (monotonic) cum += 2; else atom += 1;        // hump-shaped ⇒ buckets
+  if (sumNear100 && !monotonic) atom += 1;          // weakest signal
+
+  const representation: "ATOMIC" | "CUMULATIVE" = cum >= atom ? "CUMULATIVE" : "ATOMIC";
+  const axisDirection: "INCREASING" | "DECREASING" = incr >= decr ? "INCREASING" : "DECREASING";
+  const reason =
+    representation === "CUMULATIVE"
+      ? `Nested thresholds — ${looksThreshold ? "threshold wording" : "monotonic prices"}${monotonic ? ", monotonic" : ""} → cumulative ladder.`
+      : `Distinct ranges — ${looksBucket ? "bucket labels" : "non-monotonic prices"} → atomic buckets.`;
+  return { orderingType: "INTERVAL", representation, axisDirection, reason };
+}
+
 /* ----------------------- cumulative ladders (type D) ---------------------- *
  * Members of a cumulative ladder are *thresholds* ("by 2026", "≥ $50k"), NOT
  * MECE atoms — several resolve YES at once. The true MECE atoms are the WINDOWS

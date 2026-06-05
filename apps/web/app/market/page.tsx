@@ -11,6 +11,7 @@ import { StrategyBuilder } from "@/components/StrategyBuilder";
 import { GroupStrategyBuilder } from "@/components/GroupStrategyBuilder";
 import { CorridorBuilder } from "@/components/CorridorBuilder";
 import { LongShortBuilder } from "@/components/LongShortBuilder";
+import { TaxonomyConfirm } from "@/components/TaxonomyConfirm";
 import { QuickTrade } from "@/components/QuickTrade";
 import { ResolvePanel } from "@/components/ResolvePanel";
 import { OutcomeRows } from "@/components/OutcomeRows";
@@ -49,6 +50,11 @@ function MarketDetail() {
     api.balance().then(setBalance).catch(() => {});
     api.market(id).then(setMarket).catch(() => {});
     api.history(id).then(setHistory).catch(() => {});
+  }, [id]);
+
+  const refetchMarkets = useCallback(() => {
+    api.market(id).then(setMarket).catch(() => {});
+    api.markets().then(setSiblings).catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -210,6 +216,9 @@ function MarketDetail() {
             <h2 className="text-[20px] font-extrabold tracking-[-0.02em]">Strategies</h2>
             <span className="text-[12.5px] text-muted">Combine legs across outcomes — all fill together or nothing commits.</span>
           </div>
+          {multi && group[0]?.orderingType && group[0]?.orderingType !== "NOMINAL" && !group[0]?.taxonomyConfirmed && (
+            <TaxonomyConfirm group={group} onConfirmed={refetchMarkets} />
+          )}
           {group[0]?.representation === "CUMULATIVE" && group[0]?.taxonomyConfirmed ? (
             <CorridorBuilder group={group} title={groupTitle} onExecuted={refreshAccount} />
           ) : (
