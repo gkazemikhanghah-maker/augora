@@ -37,8 +37,8 @@ export function QuickTrade({
   const heldNo = positions.find((p) => p.side === "NO")?.qty ?? 0;
   const held = side === "YES" ? heldYes : heldNo;
 
-  // when entering sell mode, default the qty to current holdings of the side
-  useEffect(() => { if (action === "sell") setSellQty(held); }, [action, side, held]);
+  // entering sell mode: default to closing what you hold, or 10 to open a fresh short
+  useEffect(() => { if (action === "sell") setSellQty(held > 0 ? held : 10); }, [action, side, held]);
 
   const yesAsk = book?.yesAsks.length ? Math.min(...book.yesAsks.map((l) => l.priceCents)) : market.priceCents ?? 50;
   const yesBidBest = book?.yesBids.length ? Math.max(...book.yesBids.map((l) => l.priceCents)) : null;
@@ -69,11 +69,22 @@ export function QuickTrade({
 
   const closed = market.status !== "open";
 
+  // --- the four binary-option states, each a (action, side) pair ---
+  const OPT_STATES = [
+    { key: "LC", name: "Long Call",  act: "buy" as const,  s: "YES" as Side, verb: "Buy Yes",   flow: "pay" as const,     desc: "Pay premium now · win $1 if it resolves Yes. Max loss = premium." },
+    { key: "SC", name: "Short Call", act: "sell" as const, s: "YES" as Side, verb: "Write Yes", flow: "receive" as const, desc: "Receive premium now · collateral blocked · you owe if it resolves Yes." },
+    { key: "LP", name: "Long Put",   act: "buy" as const,  s: "NO" as Side,  verb: "Buy No",    flow: "pay" as const,     desc: "Pay premium now · win $1 if it resolves No. Max loss = premium." },
+    { key: "SP", name: "Short Put",  act: "sell" as const, s: "NO" as Side,  verb: "Write No",  flow: "receive" as const, desc: "Receive premium now · collateral blocked · you owe if it resolves No." },
+  ];
+  const activeKey = action === "buy" ? (side === "YES" ? "LC" : "LP") : side === "YES" ? "SC" : "SP";
+  const priceFor = (key: string) => (key === "LC" ? yesAsk : key === "SC" ? yesBidForSell : key === "LP" ? noAsk : noBidForSell);
+
   // --- summary numbers ---
   const buyCostCents = fill ? fill.collateralCents + fill.feeCents : qty * price;
   const buyShares = fill ? fill.filledQty : qty;
   // sell: proceeds = qty*100 (merge) − cost of buying opposite. Closing portion frees collateral.
   const closingQty = Math.min(qty, held);
+  const shortQty = Math.max(0, qty - held);
   const oppCostCents = fill ? fill.collateralCents + fill.feeCents : qty * (100 - price);
   const sellProceedsCents = closingQty * 100 - (fill ? fill.collateralCents : closingQty * (100 - price));
 
@@ -101,41 +112,49 @@ export function QuickTrade({
 
   return (
     <div className="rounded-xl border border-line bg-card p-4 shadow-soft">
-      {/* Buy / Sell tabs */}
-      <div className="mb-3 flex border-b border-line">
-        {(["buy", "sell"] as const).map((a) => (
-          <button key={a} onClick={() => setAction(a)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-[13px] font-semibold capitalize transition ${action === a ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}>
-            {a}
-          </button>
-        ))}
+      {/* hold indicator */}
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted">Position</span>
         {(heldYes > 0 || heldNo > 0) && (
-          <span className="ml-auto self-center font-mono text-[11px] text-muted">
+          <span className="font-mono text-[11px] text-muted">
             You hold {heldYes > 0 ? `${heldYes} YES` : ""}{heldYes > 0 && heldNo > 0 ? " · " : ""}{heldNo > 0 ? `${heldNo} NO` : ""}
           </span>
         )}
       </div>
 
-      {/* Yes / No */}
+      {/* four binary-option states (the trade actions, framed as options) */}
       <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => setSide("YES")}
-          className={`rounded-lg border py-3 text-center transition ${side === "YES" ? "border-green bg-green-soft" : "border-line bg-card hover:border-line-strong"}`}>
-          <div className="text-[12px] font-semibold" style={{ color: side === "YES" ? "var(--green)" : "var(--muted)" }}>Yes {heldYes > 0 ? `· ${heldYes}` : ""}</div>
-          <div className="font-mono text-[18px] font-bold" style={{ color: side === "YES" ? "var(--green)" : "var(--ink)" }}>{action === "sell" ? yesBidForSell : yesAsk}¢</div>
-        </button>
-        <button onClick={() => setSide("NO")}
-          className={`rounded-lg border py-3 text-center transition ${side === "NO" ? "border-red bg-red-soft" : "border-line bg-card hover:border-line-strong"}`}>
-          <div className="text-[12px] font-semibold" style={{ color: side === "NO" ? "var(--red)" : "var(--muted)" }}>No {heldNo > 0 ? `· ${heldNo}` : ""}</div>
-          <div className="font-mono text-[18px] font-bold" style={{ color: side === "NO" ? "var(--red)" : "var(--ink)" }}>{action === "sell" ? noBidForSell : noAsk}¢</div>
-        </button>
+        {OPT_STATES.map((o) => {
+          const on = activeKey === o.key;
+          const isCall = o.s === "YES";
+          const accent = isCall ? "var(--green)" : "var(--red)";
+          return (
+            <button key={o.key} onClick={() => { setAction(o.act); setSide(o.s); }}
+              className={`rounded-lg border px-3 py-2.5 text-left transition ${on ? "shadow-soft" : "hover:border-line-strong"}`}
+              style={{ borderColor: on ? accent : "var(--line)", background: on ? (isCall ? "var(--green-soft)" : "var(--red-soft)") : "var(--card)" }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] font-bold" style={{ color: on ? accent : "var(--ink)" }}>{o.name}</span>
+                <span className="font-mono text-[13px] font-bold" style={{ color: on ? accent : "var(--ink)" }}>{priceFor(o.key)}¢</span>
+              </div>
+              <div className="mt-0.5 flex items-center justify-between">
+                <span className="text-[10.5px] text-muted">{o.verb}</span>
+                <span className="font-mono text-[9px] font-semibold" style={{ color: o.flow === "pay" ? "var(--red)" : "var(--green)" }}>
+                  {o.flow === "pay" ? "▲ pay" : "▼ receive"}
+                </span>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* plain-language translation of the current Buy/Sell × Yes/No combination */}
-      <div className="mt-2 text-center text-[10.5px] text-muted">
-        {action === "buy" && side === "YES" && "Buy Yes — win $1 if it resolves true"}
-        {action === "buy" && side === "NO" && "Buy No — win $1 if it resolves false"}
-        {action === "sell" && side === "YES" && "Sell Yes — close, or short Yes (= write)"}
-        {action === "sell" && side === "NO" && "Sell No — close, or short No (= write)"}
+      {/* plain-language for the selected state + the cash-flow / hedging note */}
+      <div className="mt-2 rounded-lg bg-ink/[0.03] px-3 py-2 text-[10.5px] leading-snug text-muted">
+        {OPT_STATES.find((o) => o.key === activeKey)?.desc}
+        {action === "sell" && (
+          <span className="mt-1 block text-[10px]">
+            Same payoff as {side === "YES" ? "buying No (Long Put)" : "buying Yes (Long Call)"} — but cash comes in now instead of going out, so it works as an income / hedge leg.
+          </span>
+        )}
       </div>
 
       {/* order type */}
@@ -172,9 +191,9 @@ export function QuickTrade({
         </>
       ) : (
         <>
-          {/* shares to sell */}
+          {/* shares to write / sell */}
           <div className="mt-4 flex items-center justify-between">
-            <span className="text-[12px] font-medium text-muted">Shares to sell</span>
+            <span className="text-[12px] font-medium text-muted">{held > 0 ? "Shares to sell" : "Contracts to write"}</span>
             <span className="font-mono text-[11px] text-muted">{held} held</span>
           </div>
           <div className="mt-1.5 flex items-center rounded-lg border border-line px-3 py-2.5">
@@ -182,12 +201,16 @@ export function QuickTrade({
               className="w-full bg-transparent text-right font-mono text-[22px] font-bold outline-none" />
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
-            {[25, 50, 100].map((pct) => (
-              <button key={pct} onClick={() => setSellQty(Math.floor((held * pct) / 100))} className="rounded-md border border-line py-1 text-[11px] font-medium text-muted hover:border-line-strong hover:text-ink">{pct}%</button>
-            ))}
+            {held > 0
+              ? [25, 50, 100].map((pct) => (
+                  <button key={pct} onClick={() => setSellQty(Math.floor((held * pct) / 100))} className="rounded-md border border-line py-1 text-[11px] font-medium text-muted hover:border-line-strong hover:text-ink">{pct}%</button>
+                ))
+              : [10, 50, 100].map((n) => (
+                  <button key={n} onClick={() => setSellQty((q) => q + n)} className="rounded-md border border-line py-1 text-[11px] font-medium text-muted hover:border-line-strong hover:text-ink">+{n}</button>
+                ))}
           </div>
-          {qty > held && held >= 0 && (
-            <p className="mt-2 text-[10.5px] leading-snug text-amber">Selling more than you hold opens a short — premium in, collateral blocked (like writing an option).</p>
+          {shortQty > 0 && closingQty > 0 && (
+            <p className="mt-2 text-[10.5px] leading-snug text-amber">{closingQty} closes your holding; the remaining {shortQty} opens a short (premium in, collateral blocked).</p>
           )}
         </>
       )}
@@ -197,14 +220,25 @@ export function QuickTrade({
         {action === "buy" ? (
           <>
             <Row label="Avg price" value={fill && fill.filledQty > 0 ? `${Math.round(fill.avgPriceCents)}¢` : `${price}¢`} />
-            <Row label="Max loss" value={moneyC(buyCostCents)} color="var(--red)" strong />
-            <Row label={`If ${side} wins`} value={moneyC(buyShares * 100)} color="var(--green)" />
+            <Row label="Premium paid · max loss" value={moneyC(buyCostCents)} color="var(--red)" strong />
+            <Row label="Max profit" value={moneyC(Math.max(0, buyShares * 100 - buyCostCents))} color="var(--green)" />
           </>
         ) : (
           <>
-            <Row label="Sell price" value={`${price}¢`} />
-            <Row label="Est. proceeds" value={`+${moneyC(Math.max(0, sellProceedsCents))}`} color="var(--green)" strong />
-            {closingQty > 0 && <Row label="Closing" value={`${closingQty} ${side}`} />}
+            {closingQty > 0 && (
+              <>
+                <Row label="Sell price" value={`${price}¢`} />
+                <Row label="Close proceeds" value={`+${moneyC(Math.max(0, sellProceedsCents))}`} color="var(--green)" strong />
+                <Row label="Closing" value={`${closingQty} ${side}`} />
+              </>
+            )}
+            {shortQty > 0 && (
+              <>
+                <Row label="Premium received · max profit" value={`+${moneyC(shortQty * price)}`} color="var(--green)" strong />
+                <Row label="Max loss · collateral" value={moneyC(shortQty * (100 - price))} color="var(--red)" />
+                <Row label={`Writing ${shortQty} ${side}`} value={`${price}¢`} />
+              </>
+            )}
           </>
         )}
       </div>
@@ -212,7 +246,7 @@ export function QuickTrade({
       <button onClick={submit} disabled={busy || closed || qty <= 0}
         className={`mt-3 w-full rounded-lg py-3 text-[14px] font-bold text-white transition hover:brightness-95 disabled:opacity-50 ${action === "sell" ? "bg-ink" : "bg-green"}`}>
         {closed ? "Market closed" : busy ? "Working…" : action === "sell"
-          ? `Sell ${qty} ${side}`
+          ? shortQty > 0 && closingQty === 0 ? `Write ${qty} ${side}` : `Sell ${qty} ${side}`
           : `Buy · ${moneyC(buyCostCents)}`}
       </button>
       {msg && <div className="mt-2 text-center text-[11px] font-medium" style={{ color: msg.ok ? "var(--green)" : "var(--red)" }}>{msg.ok ? "✓ " : "✗ "}{msg.text}</div>}
