@@ -23,13 +23,23 @@ function mkMarket(p: Partial<Market> & Pick<Market, "id" | "question" | "type" |
   };
 }
 
-/** Quote a two-sided market around a fair YES price (in cents) with a spread. */
+/** Quote a two-sided market around a fair YES price (in cents) with a spread.
+ *  Posts a 5-level ladder on each side so the order book / depth have real depth. */
 function quote(store: Store, marketId: string, fairYes: number, spreadC: number, qty: number): void {
   const eng = store.engine(marketId);
-  const yesBid = Math.max(1, Math.round(fairYes - spreadC / 2));
-  const noBid = Math.max(1, Math.round(100 - fairYes - spreadC / 2)); // YES ask = 100 - noBid
-  eng.submit({ userId: MM, side: "YES", type: "limit", priceCents: yesBid, qty });
-  eng.submit({ userId: MM, side: "NO", type: "limit", priceCents: noBid, qty });
+  store.ensureUser(MM);
+  // a 5-level ladder ties up more collateral than a single quote; keep the MM funded
+  if (store.ledger.bal(MM) < qty * 100 * 12) store.ledger.deposit(MM, qty * 100 * 30);
+  const LEVELS = 5;
+  const yesBid0 = Math.max(1, Math.round(fairYes - spreadC / 2));
+  const noBid0 = Math.max(1, Math.round(100 - fairYes - spreadC / 2)); // YES ask = 100 - noBid
+  for (let k = 0; k < LEVELS; k++) {
+    const lvlQty = Math.round(qty * (1 + 0.5 * k)); // a little more size away from the touch
+    const yb = yesBid0 - k;
+    const nb = noBid0 - k;
+    if (yb >= 1) eng.submit({ userId: MM, side: "YES", type: "limit", priceCents: yb, qty: lvlQty });
+    if (nb >= 1) eng.submit({ userId: MM, side: "NO", type: "limit", priceCents: nb, qty: lvlQty });
+  }
 }
 
 /** Build a short synthetic price history so the chart isn't empty. */

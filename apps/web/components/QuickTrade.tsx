@@ -91,13 +91,18 @@ export function QuickTrade({
   async function submit() {
     setBusy(true); setMsg(null);
     try {
+      // Opening a fresh short with a market order is a true native write (premium received,
+      // full collateral blocked, position tagged SHORT). Closing or limit stays on the sell path.
+      const isWrite = action === "sell" && held === 0 && otype === "market";
       const res = await api.placeOrder({
         market_id: market.id, side, type: otype,
         price: otype === "limit" ? limitPrice : undefined,
-        qty, action,
+        qty, action: isWrite ? "write" : action,
       });
       const filled = res.trades.reduce((s, t) => s + t.qty, 0);
-      if (action === "sell") {
+      if (isWrite) {
+        setMsg({ ok: true, text: `Wrote ${filled || qty} ${side} · premium received, collateral blocked` });
+      } else if (action === "sell") {
         setMsg({ ok: true, text: `Sold ${filled || qty} ${side}${res.mergedPairs ? ` · closed ${res.mergedPairs}` : ""}` });
       } else {
         const rested = res.order.qty - filled;

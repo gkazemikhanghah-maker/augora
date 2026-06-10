@@ -113,7 +113,7 @@ export const api = {
     req<{ history: PricePoint[] }>(`/markets/${id}/history`).then((r) => r.history),
   balance: () => req<{ balanceCents: number; lockedCents: number }>("/me/balance"),
   positions: () => req<{ positions: MtmPosition[] }>("/me/positions").then((r) => r.positions),
-  placeOrder: (body: { market_id: string; side: Side; type: "limit" | "market"; price?: number; qty: number; action?: "buy" | "sell" }) =>
+  placeOrder: (body: { market_id: string; side: Side; type: "limit" | "market"; price?: number; qty: number; action?: "buy" | "sell" | "write" }) =>
     req<{ order: Order; trades: Trade[]; mergedPairs?: number }>("/orders", { method: "POST", body: JSON.stringify(body) }),
   fillPreview: (market_id: string, legs: LegInput[]) =>
     req<MultiLegPreview>("/strategy/fill-preview", { method: "POST", body: JSON.stringify({ market_id, legs }) }),

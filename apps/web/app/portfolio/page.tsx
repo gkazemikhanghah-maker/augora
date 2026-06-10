@@ -73,7 +73,7 @@ function PositionRow({ p, onClosed }: { p: MtmPosition; onClosed: () => void }) 
   const closeQty = Math.min(Math.max(0, qty), p.qty);
   // proportional, sign-correct estimate from the server-computed unrealized P&L
   const estPnl = p.qty > 0 ? Math.round((p.unrealizedPnlCents * closeQty) / p.qty) : 0;
-  const sideLabel = p.written ? "SHORT YES" : p.side;
+  const sideLabel = p.written ? `SHORT ${p.side === "NO" ? "YES" : "NO"}` : p.side;
 
   async function close() {
     if (closeQty <= 0) return;
@@ -104,7 +104,7 @@ function PositionRow({ p, onClosed }: { p: MtmPosition; onClosed: () => void }) 
           )}
         </Link>
         {p.written ? (
-          <span className="text-[11px]" style={{ color: "var(--red)" }} title="Written short: premium collected, $1/contract collateral blocked">SHORT YES</span>
+          <span className="text-[11px]" style={{ color: "var(--red)" }} title="Written short: premium collected, $1/contract collateral blocked">{sideLabel}</span>
         ) : (
           <span style={{ color: p.side === "YES" ? "var(--green)" : "var(--red)" }}>{p.side}</span>
         )}

@@ -214,9 +214,9 @@ export class MatchingEngine {
     return { order, trades: newTrades };
   }
 
-  private addWrittenPosition(userId: string, qty: number, priceCents: Cents): void {
-    this.addToPosition(userId, "NO", qty, priceCents); // short YES ≡ holding NO for settlement
-    const cur = this.positions.get(this.posKey(userId, "NO"));
+  private addWrittenPosition(userId: string, holdSide: Side, qty: number, priceCents: Cents): void {
+    this.addToPosition(userId, holdSide, qty, priceCents); // short = holding the opposite for settlement
+    const cur = this.positions.get(this.posKey(userId, holdSide));
     if (cur) cur.written = true;
   }
 
@@ -229,15 +229,18 @@ export class MatchingEngine {
    * is surfaced as a written short. Invariants are preserved: every posting nets
    * to zero, escrow holds exactly 100¢/pair, and settlement drains it.
    */
-  write(input: { userId: string; qty: number }): { order: Order; trades: Trade[] } {
+  write(input: { userId: string; qty: number; side?: Side }): { order: Order; trades: Trade[] } {
     if (this.market.status !== "open") throw new Error("Market not open");
     if (!Number.isInteger(input.qty) || input.qty <= 0) throw new Error("qty must be positive integer");
+
+    const writeSide: Side = input.side ?? "YES";              // the side being written (the short)
+    const holdSide: Side = writeSide === "YES" ? "NO" : "YES"; // writer settles holding the opposite
 
     const order: Order = {
       id: `O${++this.orderSeq}`,
       marketId: this.market.id,
       userId: input.userId,
-      side: "NO", // writer ends up holding NO (short YES)
+      side: holdSide, // writer ends up holding the opposite side (short writeSide)
       type: "market",
       priceCents: 99,
       qty: input.qty,
@@ -248,14 +251,14 @@ export class MatchingEngine {
     };
 
     const newTrades: Trade[] = [];
-    const book = this.bidsYES; // resting YES buyers we provide YES to
+    const book = writeSide === "YES" ? this.bidsYES : this.bidsNO; // resting buyers of the side we write
     this.sortBook(book);
 
     let remaining = input.qty;
     while (remaining > 0 && book.length > 0) {
       const maker = book[0]!;
-      const makerPrice = maker.order.priceCents; // YES premium the buyer bid
-      const noPrice = 100 - makerPrice; // writer's effective cost basis
+      const makerPrice = maker.order.priceCents; // premium the buyer bid for writeSide
+      const holdPrice = 100 - makerPrice; // writer's effective cost basis on holdSide
       const take = Math.min(remaining, maker.remaining);
 
       // native-write funding: writer posts FULL collateral, buyer's premium → writer
@@ -264,19 +267,20 @@ export class MatchingEngine {
       this.mintedPairs += take;
 
       // symmetric fees (same basis as submit)
-      this.ledger.chargeFee(input.userId, feeCents(take, noPrice / 100, this.market.feeMult), order.id);
+      this.ledger.chargeFee(input.userId, feeCents(take, holdPrice / 100, this.market.feeMult), order.id);
       this.ledger.chargeFee(maker.order.userId, feeCents(take, makerPrice / 100, this.market.feeMult), maker.order.id);
 
-      // positions: buyer long YES, writer short YES (held as written NO)
-      this.addToPosition(maker.order.userId, "YES", take, makerPrice);
-      this.addWrittenPosition(input.userId, take, noPrice);
+      // positions: buyer long writeSide, writer short writeSide (held as written holdSide)
+      this.addToPosition(maker.order.userId, writeSide, take, makerPrice);
+      this.addWrittenPosition(input.userId, holdSide, take, holdPrice);
 
+      const yesPriceCents = writeSide === "YES" ? makerPrice : 100 - makerPrice;
       const trade: Trade = {
         id: `T${++this.tradeSeq}`,
         marketId: this.market.id,
         makerOrderId: maker.order.id,
         takerOrderId: order.id,
-        yesPriceCents: makerPrice,
+        yesPriceCents,
         qty: take,
         ts: this.now(),
       };
@@ -513,10 +517,10 @@ export class MatchingEngine {
 
   /** mid price in cents from best YES bid/ask, or null if one side empty. */
   midCents(): number | null {
-    const ob = this.orderbook(1);
-    const bestBid = ob.yesBids[0]?.priceCents;
-    const bestAsk = ob.yesAsks[0]?.priceCents;
-    if (bestBid == null || bestAsk == null) return null;
+    const ob = this.orderbook();
+    if (!ob.yesBids.length || !ob.yesAsks.length) return null;
+    const bestBid = Math.max(...ob.yesBids.map((l) => l.priceCents)); // highest YES bid
+    const bestAsk = Math.min(...ob.yesAsks.map((l) => l.priceCents)); // lowest YES ask
     return (bestBid + bestAsk) / 2;
   }
 

@@ -34,10 +34,19 @@ function fairYesFromLive(lm: LiveMarket, unknownDefault = 50): number {
 /** Two-sided MM quote around a fair YES price (cents). */
 function quote(store: Store, marketId: string, fairYes: number, spreadC: number, qty: number): void {
   const eng = store.engine(marketId);
-  const yesBid = Math.max(1, Math.min(98, Math.round(fairYes - spreadC / 2)));
-  const noBid = Math.max(1, Math.min(98, Math.round(100 - fairYes - spreadC / 2)));
-  eng.submit({ userId: MM, side: "YES", type: "limit", priceCents: yesBid, qty });
-  eng.submit({ userId: MM, side: "NO", type: "limit", priceCents: noBid, qty });
+  store.ensureUser(MM);
+  // a 5-level ladder ties up more collateral than a single quote; keep the MM funded
+  if (store.ledger.bal(MM) < qty * 100 * 12) store.ledger.deposit(MM, qty * 100 * 30);
+  const LEVELS = 5;
+  const yesBid0 = Math.max(1, Math.min(98, Math.round(fairYes - spreadC / 2)));
+  const noBid0 = Math.max(1, Math.min(98, Math.round(100 - fairYes - spreadC / 2)));
+  for (let k = 0; k < LEVELS; k++) {
+    const lvlQty = Math.round(qty * (1 + 0.5 * k));
+    const yb = yesBid0 - k;
+    const nb = noBid0 - k;
+    if (yb >= 1) eng.submit({ userId: MM, side: "YES", type: "limit", priceCents: yb, qty: lvlQty });
+    if (nb >= 1) eng.submit({ userId: MM, side: "NO", type: "limit", priceCents: nb, qty: lvlQty });
+  }
 }
 
 function seedFlatHistory(store: Store, marketId: string, priceC: number, n = 24): void {
@@ -356,7 +365,8 @@ export function requote(store: Store, marketId: string, fairYesC: number, spread
   eng.cancelUserOrders(MM);
   store.ensureUser(MM);
   // defensive top-up: never let a periodic re-quote hit the negative-balance guard
-  if (store.ledger.bal(MM) < qty * 100 * 4) store.ledger.deposit(MM, qty * 100 * 8);
+  // (the 5-level ladder ties up more collateral than a single quote did)
+  if (store.ledger.bal(MM) < qty * 100 * 15) store.ledger.deposit(MM, qty * 100 * 40);
   quote(store, marketId, fairYesC, spreadC, qty);
   store.recordPrice(marketId);
 }

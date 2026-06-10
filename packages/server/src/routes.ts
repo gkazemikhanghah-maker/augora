@@ -105,7 +105,7 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
       const eng = store.engine(market_id);
       const result =
         action === "write"
-          ? eng.write({ userId, qty })
+          ? eng.write({ userId, side, qty })
           : action === "sell"
           ? eng.sell({ userId, side, type, priceCents: price, qty })
           : eng.submit({ userId, side, type, priceCents: price, qty });
@@ -280,7 +280,7 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
       const executed = legs.map((leg) => ({
         marketId: leg.marketId,
         ...(leg.intent === "write"
-          ? store.engine(leg.marketId).write({ userId, qty: leg.qty })
+          ? store.engine(leg.marketId).write({ userId, side: leg.side, qty: leg.qty })
           : store.engine(leg.marketId).submit({
               userId,
               side: leg.side,
