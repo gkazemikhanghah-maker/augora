@@ -21,7 +21,9 @@ export default function PortfolioPage() {
   if (!balance || !positions) return <Note>Loading…</Note>;
 
   const totalUnreal = positions.reduce((s, p) => s + p.unrealizedPnlCents, 0);
-  // equity = cash + collateral + marked value of still-open positions
+  // collateral tied up = resting-order locks + cost basis of open positions (sitting in escrow)
+  const committed = balance.lockedCents + positions.reduce((s, p) => s + (!p.settled ? p.qty * p.avgPriceCents : 0), 0);
+  // equity = cash + locked + marked value of still-open positions
   const openValue = positions.reduce(
     (s, p) => s + (!p.settled && p.markCents != null ? p.qty * p.markCents : 0),
     0,
@@ -34,9 +36,10 @@ export default function PortfolioPage() {
       <p className="mt-2 text-[13px] text-muted">Playground mode with virtual balance — for paper trading.</p>
 
       {/* summary */}
-      <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-soft sm:grid-cols-4">
-        <Cell label="Free balance" value={moneyC(balance.balanceCents)} />
-        <Cell label="Locked (collateral)" value={moneyC(balance.lockedCents)} />
+      <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-soft sm:grid-cols-5">
+        <Cell label="Cash (free)" value={moneyC(balance.balanceCents)} />
+        <Cell label="Blocked (collateral)" value={moneyC(committed)} />
+        <Cell label="In positions" value={moneyC(openValue)} />
         <Cell label="Equity" value={moneyC(equity)} />
         <Cell label="P&L (open + settled)" value={moneyC(totalUnreal)} color={totalUnreal >= 0 ? "var(--green)" : "var(--red)"} />
       </div>

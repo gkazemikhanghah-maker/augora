@@ -2,6 +2,7 @@ import "./globals.css";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Onboarding } from "@/components/Onboarding";
+import { AccountStrip } from "@/components/AccountStrip";
 
 export const metadata = {
   title: "Augora — Prediction Market",
@@ -28,7 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </span>
               <span className="text-[18px] font-bold tracking-[-0.02em]">Augora</span>
               <span className="rounded bg-ink/5 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-muted" title="build marker">
-                build 31 · native-write shorts
+                build 32 · account summary
               </span>
             </Link>
             <nav className="hidden items-center gap-5 text-[13px] font-medium text-muted md:flex">
@@ -39,10 +40,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/portfolio" className="transition hover:text-ink">Portfolio</Link>
             </nav>
             <div className="ml-auto flex items-center gap-4">
-              <div className="hidden text-right sm:block">
-                <div className="text-[10px] uppercase tracking-wide text-muted">Playground</div>
-                <div className="text-[13px] font-semibold text-green">$10,000</div>
-              </div>
+              <AccountStrip />
               <Onboarding />
             </div>
           </div>
