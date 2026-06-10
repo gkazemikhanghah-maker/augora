@@ -183,10 +183,53 @@ const TOP_N = 5;
  *  only the TOP_N options with real trade volume and fold everything else into a
  *  single "Other" row, the way Polymarket itself collapses the long tail. Ladder
  *  and small groups are kept in full. */
+/** Categorical outcomes are MECE → their YES fairs must sum to $1 (100¢). Adjust a
+ *  set of integer-cent fairs to sum to exactly 100. If an "Other" residual slot exists
+ *  (otherIdx), it absorbs the residual; otherwise every member is scaled proportionally.
+ *  Ladders are cumulative and must NOT be passed here. */
+export function normalizeToHundred(fairs: number[], otherIdx: number | null): number[] {
+  const out = fairs.slice();
+  if (out.length === 0) return out;
+  if (otherIdx != null && otherIdx >= 0) {
+    let rest = out.reduce((s, v, i) => (i === otherIdx ? s : s + v), 0);
+    if (rest >= 99) {
+      // over-round book: scale the non-Other members down to leave Other = 1
+      const scale = 99 / rest;
+      let acc = 0;
+      for (let i = 0; i < out.length; i++) {
+        if (i === otherIdx) continue;
+        const v = Math.max(1, Math.round((out[i] ?? 0) * scale));
+        out[i] = v;
+        acc += v;
+      }
+      out[otherIdx] = Math.max(1, 100 - acc);
+    } else {
+      out[otherIdx] = Math.max(1, 100 - rest);
+    }
+    return out;
+  }
+  // no residual slot: scale all members proportionally, then fix rounding drift
+  const sum = out.reduce((s, v) => s + v, 0) || 1;
+  let acc = 0;
+  for (let i = 0; i < out.length; i++) {
+    const v = Math.max(1, Math.round(((out[i] ?? 0) * 100) / sum));
+    out[i] = v;
+    acc += v;
+  }
+  const drift = 100 - acc;
+  if (drift !== 0) {
+    let maxI = 0;
+    for (let i = 1; i < out.length; i++) if ((out[i] ?? 0) > (out[maxI] ?? 0)) maxI = i;
+    out[maxI] = Math.max(1, (out[maxI] ?? 0) + drift);
+  }
+  return out;
+}
+
 function buildMemberSpecs(ev: LiveEvent, type: MarketType): MemberSpec[] {
   const collapse = type === "categorical" && ev.markets.length > TOP_N + 1;
+  let specs: MemberSpec[];
   if (!collapse) {
-    return orderMembers(ev, type).map(({ lm, parsed, value }) => ({
+    specs = orderMembers(ev, type).map(({ lm, parsed, value }) => ({
       sourceId: lm.id,
       slug: lm.slug,
       yesTokenId: lm.yesTokenId,
@@ -195,30 +238,39 @@ function buildMemberSpecs(ev: LiveEvent, type: MarketType): MemberSpec[] {
       expiryTs: endTs(lm),
       ...(value != null && parsed ? { orderValue: value, orderKind: parsed.kind, orderLabel: parsed.axisLabel } : {}),
     }));
-  }
-  // "meaningful" = has real trade volume; placeholders trade ~0 and sit at 50¢.
-  const hasVol = ev.markets.some((m) => (m.volume ?? 0) > 0);
-  const real = hasVol
-    ? ev.markets.filter((m) => (m.volume ?? 0) > 0)
-    : ev.markets.filter((m) => { const p = m.outcomes[0]?.priceCents; return p != null && p !== 50; });
-  const pool = real.length ? real : ev.markets;
-  const top = [...pool].sort((a, b) => (b.outcomes[0]?.priceCents ?? 0) - (a.outcomes[0]?.priceCents ?? 0)).slice(0, TOP_N);
+  } else {
+    // "meaningful" = has real trade volume; placeholders trade ~0 and sit at 50¢.
+    const hasVol = ev.markets.some((m) => (m.volume ?? 0) > 0);
+    const real = hasVol
+      ? ev.markets.filter((m) => (m.volume ?? 0) > 0)
+      : ev.markets.filter((m) => { const p = m.outcomes[0]?.priceCents; return p != null && p !== 50; });
+    const pool = real.length ? real : ev.markets;
+    const top = [...pool].sort((a, b) => (b.outcomes[0]?.priceCents ?? 0) - (a.outcomes[0]?.priceCents ?? 0)).slice(0, TOP_N);
 
-  const specs: MemberSpec[] = top.map((lm) => ({
+    specs = top.map((lm) => ({
       sourceId: lm.id,
       slug: lm.slug,
       yesTokenId: lm.yesTokenId,
-    label: liveGroupLabel(lm),
-    fair: fairYesFromLive(lm, 1),
-    expiryTs: endTs(lm),
-  }));
-  const sum = specs.reduce((s, m) => s + m.fair, 0);
-  specs.push({
-    sourceId: null,
-    label: "Other",
-    fair: Math.max(1, Math.min(99, 100 - sum)),
-    expiryTs: Math.max(...ev.markets.map(endTs)),
-  });
+      label: liveGroupLabel(lm),
+      fair: fairYesFromLive(lm, 1),
+      expiryTs: endTs(lm),
+    }));
+    const sum = specs.reduce((s, m) => s + m.fair, 0);
+    specs.push({
+      sourceId: null,
+      label: "Other",
+      fair: Math.max(1, Math.min(99, 100 - sum)),
+      expiryTs: Math.max(...ev.markets.map(endTs)),
+    });
+  }
+
+  // categorical members are mutually exclusive → normalize YES fairs to sum 100¢.
+  // (Ladders are cumulative and are intentionally left untouched.)
+  if (type === "categorical") {
+    const otherIdx = specs.findIndex((s) => s.sourceId == null);
+    const norm = normalizeToHundred(specs.map((s) => s.fair), otherIdx);
+    specs.forEach((s, i) => { s.fair = norm[i]!; });
+  }
   return specs;
 }
 
@@ -262,22 +314,34 @@ export async function importLiveEvent(
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   if (existing.length) {
     // map each existing member to its fresh data by sourceId (robust to ordering
-    // and to the list endpoint returning a different subset). Members with no
-    // map each existing member to its fresh data by sourceId (robust to ordering
     // and to the list endpoint returning a different subset). The synthetic
-    // "Other" row (no sourceId) is re-priced to the recomputed residual.
-    const otherFair = buildMemberSpecs(ev, type).find((s) => s.sourceId == null)?.fair ?? 1;
+    // "Other" row (no sourceId) absorbs the residual. For categorical groups the
+    // whole set is normalized to sum 100¢ BEFORE requoting (members are MECE);
+    // ladders are cumulative and refreshed independently.
     const bySource = new Map(ev.markets.map((lm) => [lm.id, lm]));
-    let refreshedHist = 0;
-    for (const m of existing) {
-      if (store.settlement.isSettled(m.id)) continue;
-      if (!m.sourceId) { requote(store, m.id, otherFair); continue; }
+    const active = existing.filter((m) => !store.settlement.isSettled(m.id));
+    // raw target fair per active member (Other → placeholder, replaced by normalize)
+    const targets = active.map((m) => {
+      if (!m.sourceId) return 1;
       const lm = bySource.get(m.sourceId);
-      requote(store, m.id, lm ? fairYesFromLive(lm, 1) : 1);
-      // also pull real price history so the chart isn't stuck on the old flat seed
-      if (await seedHistory(store, m.id, lm?.yesTokenId, m.sourceId, lm ? fairYesFromLive(lm, 1) : 1)) refreshedHist++;
+      return lm ? fairYesFromLive(lm, 1) : 1;
+    });
+    const fairs =
+      type === "categorical"
+        ? normalizeToHundred(targets, active.findIndex((m) => !m.sourceId))
+        : targets;
+    let refreshedHist = 0;
+    for (let i = 0; i < active.length; i++) {
+      const m = active[i]!;
+      const fair = fairs[i]!;
+      requote(store, m.id, fair);
+      if (m.sourceId) {
+        const lm = bySource.get(m.sourceId);
+        // also pull real price history so the chart isn't stuck on the old flat seed
+        if (await seedHistory(store, m.id, lm?.yesTokenId, m.sourceId, fair)) refreshedHist++;
+      }
     }
-    console.log(`[augora] re-import ${groupId}: refreshed ${existing.length} members, ${refreshedHist} got real history`);
+    console.log(`[augora] re-import ${groupId}: refreshed ${active.length} members, ${refreshedHist} got real history`);
     return { groupId, type, markets: existing, event: ev };
   }
 

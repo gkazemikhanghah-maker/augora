@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { escrowId, PLATFORM, checkCategorical, checkLadder } from "@augora/core";
 import { Store, PLAYGROUND_START_CENTS } from "../src/store.js";
 import { seed } from "../src/seed.js";
+import { normalizeToHundred } from "../src/liveimport.js";
 
 describe("server seed + wiring (in-memory Store)", () => {
   it("seeds all three market types with valid type constraints", () => {
@@ -39,5 +40,41 @@ describe("server seed + wiring (in-memory Store)", () => {
 
     // conservation across every tracked account (invariant #1/#3)
     store.ledger.assertConservation();
+  });
+});
+
+describe("normalizeToHundred — categorical group prices sum to 100¢", () => {
+  const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
+
+  it("with Other slot: residual absorbs to reach exactly 100 (under-round)", () => {
+    const out = normalizeToHundred([45, 30, 12, 1 /*Other*/], 3);
+    expect(sum(out)).toBe(100);
+    expect(out[3]).toBe(13); // 100 - (45+30+12)
+    expect(out.slice(0, 3)).toEqual([45, 30, 12]); // sourced members untouched
+  });
+
+  it("with Other slot: over-round book scales members down, Other stays >=1", () => {
+    const out = normalizeToHundred([60, 50, 30, 1 /*Other*/], 3);
+    expect(sum(out)).toBe(100);
+    expect(out[3]).toBeGreaterThanOrEqual(1);
+    out.forEach((v) => expect(v).toBeGreaterThanOrEqual(1));
+  });
+
+  it("no Other slot: proportional rescale to 100 (under-round)", () => {
+    const out = normalizeToHundred([30, 20, 40], null); // sum 90
+    expect(sum(out)).toBe(100);
+    out.forEach((v) => expect(v).toBeGreaterThanOrEqual(1));
+  });
+
+  it("no Other slot: proportional rescale to 100 (over-round)", () => {
+    const out = normalizeToHundred([60, 50, 30], null); // sum 140
+    expect(sum(out)).toBe(100);
+    out.forEach((v) => expect(v).toBeGreaterThanOrEqual(1));
+  });
+
+  it("every member keeps a tradeable price >=1 even from tiny inputs", () => {
+    const out = normalizeToHundred([1, 1, 1, 1, 1], null);
+    expect(sum(out)).toBe(100);
+    out.forEach((v) => expect(v).toBeGreaterThanOrEqual(1));
   });
 });
