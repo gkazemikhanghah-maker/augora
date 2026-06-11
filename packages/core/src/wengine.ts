@@ -139,25 +139,44 @@ export function scaleW(a: WVector, s: number): WVector {
  * (addendum v1.1 §6). Per the honest caveat from review, the price-sum test is
  * the weakest signal (nested thresholds can sum near 1, e.g. 18+31+52≈101), so
  * label wording and price monotonicity are weighted higher.                    */
+/** One observable cue behind a taxonomy guess, surfaced so a human can sanity-check
+ *  the suggestion (the "why" panel). `toward` says which structure it argues for. */
+export interface TaxonomySignal {
+  label: string;
+  detail: string;
+  toward: "CUMULATIVE" | "ATOMIC" | "NEUTRAL";
+}
+
 export interface TaxonomySuggestion {
   orderingType: "NOMINAL" | "ORDINAL" | "INTERVAL";
   representation?: "ATOMIC" | "CUMULATIVE";
   axisDirection?: "INCREASING" | "DECREASING";
   reason: string;
+  /** How strongly the cues agree. LOW ⇒ a human really should look. */
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  /** The individual cues, for a debug / "why" display. */
+  signals: TaxonomySignal[];
 }
 
 export function suggestTaxonomy(
   members: { label: string; priceCents: number; orderValue?: number }[],
 ): TaxonomySuggestion {
   const ordered = members.filter((m) => m.orderValue != null);
-  const hasOrder = ordered.length >= Math.max(2, Math.ceil(members.length * 0.6));
+  const orderFrac = members.length ? ordered.length / members.length : 0;
+  const hasOrder = ordered.length >= 2 && orderFrac >= 0.6;
   if (!hasOrder) {
-    return { orderingType: "NOMINAL", reason: "No natural order in the outcomes — basket / relative only, no corridor." };
+    return {
+      orderingType: "NOMINAL",
+      reason: "Outcomes carry no numeric or date order — basket / relative only, no corridor.",
+      confidence: orderFrac <= 0.2 ? "HIGH" : "MEDIUM",
+      signals: [{ label: "Ordering", detail: `${ordered.length}/${members.length} outcomes have a numeric/date key`, toward: "NEUTRAL" }],
+    };
   }
+
   const sorted = [...ordered].sort((a, b) => a.orderValue! - b.orderValue!);
   const labels = members.map((m) => m.label.toLowerCase()).join(" | ");
-  const looksThreshold = /\b(by|over|under|above|below|at least|or more|or higher|or fewer|or less)\b|[<>]=?|≥|≤/.test(labels);
-  const looksBucket = /\d+\s*(?:[-–]|to)\s*\d+|\bbetween\b/.test(labels);
+  const looksThreshold = /\b(by|over|under|above|below|at least|or more|or higher|or fewer|or less|before|after)\b|[<>]=?|≥|≤/.test(labels);
+  const looksBucket = /\d+\s*(?:[-–—]|to)\s*\d+|\bbetween\b/.test(labels);
 
   const prices = sorted.map((m) => m.priceCents);
   let incr = 0, decr = 0;
@@ -165,22 +184,43 @@ export function suggestTaxonomy(
     if (prices[i]! > prices[i - 1]!) incr++;
     else if (prices[i]! < prices[i - 1]!) decr++;
   }
-  const monotonic = prices.length >= 2 && (incr === 0 || decr === 0);
-  const sumNear100 = Math.abs(members.reduce((s, m) => s + m.priceCents, 0) - 100) <= 8;
+  const steps = Math.max(1, prices.length - 1);
+  const monoFrac = Math.max(incr, decr) / steps;          // 1 = fully monotonic, 0.5 = hump
+  const sumCents = members.reduce((s, m) => s + m.priceCents, 0);
 
-  let cum = 0, atom = 0;
-  if (looksThreshold) cum += 3;
-  if (looksBucket) atom += 3;
-  if (monotonic) cum += 2; else atom += 1;        // hump-shaped ⇒ buckets
-  if (sumNear100 && !monotonic) atom += 1;          // weakest signal
+  const signals: TaxonomySignal[] = [];
+  let cum = 0;
+  let atom = 0;
+
+  // 1) label wording — the strongest single cue
+  if (looksThreshold && !looksBucket) { cum += 3; signals.push({ label: "Wording", detail: "threshold words (by / over / ≥ …)", toward: "CUMULATIVE" }); }
+  else if (looksBucket && !looksThreshold) { atom += 3; signals.push({ label: "Wording", detail: "range words (a–b / between)", toward: "ATOMIC" }); }
+  else if (looksThreshold && looksBucket) { signals.push({ label: "Wording", detail: "mixed threshold + range words", toward: "NEUTRAL" }); }
+  else { signals.push({ label: "Wording", detail: "no threshold / range words", toward: "NEUTRAL" }); }
+
+  // 2) price shape across the ordered members
+  if (monoFrac >= 0.99) { cum += 2; signals.push({ label: "Price shape", detail: "monotonic across the order", toward: "CUMULATIVE" }); }
+  else if (monoFrac <= 0.5) { atom += 2; signals.push({ label: "Price shape", detail: "hump-shaped / non-monotonic", toward: "ATOMIC" }); }
+  else { if (incr >= decr) cum += 1; else atom += 1; signals.push({ label: "Price shape", detail: `${Math.round(monoFrac * 100)}% monotonic`, toward: "NEUTRAL" }); }
+
+  // 3) price sum — cumulative thresholds overlap so they sum well above 100;
+  //    a MECE partition sums to ~100. (Weak near 100: a 2–3-rung ladder can too.)
+  if (sumCents > 135) { cum += 3; signals.push({ label: "Price sum", detail: `${sumCents}¢ ≫ 100 ⇒ overlapping thresholds`, toward: "CUMULATIVE" }); }
+  else if (sumCents > 115) { cum += 2; signals.push({ label: "Price sum", detail: `${sumCents}¢ > 100 ⇒ overlapping thresholds`, toward: "CUMULATIVE" }); }
+  else if (sumCents >= 88 && sumCents <= 112) { atom += 1; signals.push({ label: "Price sum", detail: `${sumCents}¢ ≈ 100 ⇒ looks mutually-exclusive`, toward: "ATOMIC" }); }
+  else { signals.push({ label: "Price sum", detail: `${sumCents}¢`, toward: "NEUTRAL" }); }
 
   const representation: "ATOMIC" | "CUMULATIVE" = cum >= atom ? "CUMULATIVE" : "ATOMIC";
   const axisDirection: "INCREASING" | "DECREASING" = incr >= decr ? "INCREASING" : "DECREASING";
+  const margin = Math.abs(cum - atom);
+  const total = cum + atom;
+  const confidence: "LOW" | "MEDIUM" | "HIGH" =
+    margin >= 4 || (total >= 4 && margin / total >= 0.6) ? "HIGH" : margin <= 1 ? "LOW" : "MEDIUM";
   const reason =
     representation === "CUMULATIVE"
-      ? `Nested thresholds — ${looksThreshold ? "threshold wording" : "monotonic prices"}${monotonic ? ", monotonic" : ""} → cumulative ladder.`
-      : `Distinct ranges — ${looksBucket ? "bucket labels" : "non-monotonic prices"} → atomic buckets.`;
-  return { orderingType: "INTERVAL", representation, axisDirection, reason };
+      ? "Nested thresholds → cumulative ladder (enables corridors & credit spreads)."
+      : "Distinct mutually-exclusive ranges → atomic buckets.";
+  return { orderingType: "INTERVAL", representation, axisDirection, reason, confidence, signals };
 }
 
 /* ----------------------- cumulative ladders (type D) ---------------------- *

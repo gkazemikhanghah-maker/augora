@@ -239,4 +239,25 @@ describe("taxonomy auto-detection (suggestTaxonomy)", () => {
     expect(s.orderingType).toBe("NOMINAL");
     expect(s.representation).toBeUndefined();
   });
+
+  it("exposes a confidence and the cue breakdown (the 'why')", () => {
+    const s = suggestTaxonomy([
+      { label: "Over 1M", priceCents: 80, orderValue: 1 },
+      { label: "Over 2M", priceCents: 50, orderValue: 2 },
+      { label: "Over 3M", priceCents: 20, orderValue: 3 },
+    ]);
+    expect(s.confidence).toBe("HIGH");
+    expect(s.signals.length).toBeGreaterThanOrEqual(3);
+    expect(s.signals.some((x) => x.toward === "CUMULATIVE")).toBe(true);
+  });
+
+  it("contradictory cues (threshold wording but hump prices, sum≈100) → LOW confidence", () => {
+    const s = suggestTaxonomy([
+      { label: "At least 1", priceCents: 30, orderValue: 1 },
+      { label: "At least 2", priceCents: 40, orderValue: 2 },
+      { label: "At least 3", priceCents: 30, orderValue: 3 },
+    ]);
+    expect(s.confidence).toBe("LOW");
+    expect(s.signals.length).toBeGreaterThanOrEqual(3);
+  });
 });

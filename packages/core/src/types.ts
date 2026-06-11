@@ -55,6 +55,11 @@ export interface Market {
   axisDirection?: "INCREASING" | "DECREASING";
   /** Human-confirmed the taxonomy above (safety gate for corridor products). */
   taxonomyConfirmed?: boolean;
+  /** Why the taxonomy was auto-suggested (debug / "why" panel). Set at import,
+   *  informational only — the human confirm above is what actually gates products. */
+  taxonomyReason?: string;
+  taxonomyConfidence?: "LOW" | "MEDIUM" | "HIGH";
+  taxonomySignals?: { label: string; detail: string; toward: "CUMULATIVE" | "ATOMIC" | "NEUTRAL" }[];
 }
 
 export type OrderType = "limit" | "market";

@@ -43,15 +43,53 @@ export function TaxonomyConfirm({ group, onConfirmed }: { group: MarketView[]; o
 
   return (
     <div className="mb-4 rounded-2xl border border-line bg-[#fbf6ee] p-4">
-      <div className="text-[13px] font-semibold">Confirm this market's structure</div>
+      <div className="flex items-center gap-2">
+        <div className="text-[13px] font-semibold">Confirm this market's structure</div>
+        {head?.taxonomyConfidence && (
+          <span
+            className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+            style={{
+              background: head.taxonomyConfidence === "HIGH" ? "var(--green-soft)" : head.taxonomyConfidence === "LOW" ? "var(--red-soft)" : "#fbf2e3",
+              color: head.taxonomyConfidence === "HIGH" ? "var(--green)" : head.taxonomyConfidence === "LOW" ? "var(--red)" : "var(--amber)",
+            }}
+          >
+            {head.taxonomyConfidence} confidence
+          </span>
+        )}
+      </div>
       <div className="mt-1 text-[11.5px] leading-[1.5] text-muted">
         Imported markets get a quick human check before corridor / credit-spread products turn on — auto-detection isn't always right.
         {head?.representation && (
           <> Detected:{" "}
-            <span className="font-semibold text-ink">{head.representation === "CUMULATIVE" ? "cumulative ladder" : "distinct buckets"}</span>.
+            <span className="font-semibold text-ink">{head.representation === "CUMULATIVE" ? "cumulative ladder" : "distinct buckets"}</span>
+            {head.taxonomyConfidence === "LOW" && <span className="text-red"> — low confidence, please double-check</span>}.
           </>
         )}
       </div>
+
+      {/* the "why" — the cues behind the guess, so a human can validate it */}
+      {head?.taxonomySignals?.length ? (
+        <div className="mt-3 rounded-xl border border-line bg-white/60 p-2.5">
+          <div className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted">Why this guess</div>
+          <div className="flex flex-col gap-1">
+            {head.taxonomySignals.map((s, idx) => (
+              <div key={idx} className="flex items-center justify-between gap-3 text-[11.5px]">
+                <span className="text-muted"><span className="font-medium text-ink">{s.label}:</span> {s.detail}</span>
+                <span
+                  className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase"
+                  style={{
+                    background: s.toward === "CUMULATIVE" ? "var(--green-soft)" : s.toward === "ATOMIC" ? "#eef3fb" : "transparent",
+                    color: s.toward === "CUMULATIVE" ? "var(--green)" : s.toward === "ATOMIC" ? "#3b6fb0" : "var(--muted)",
+                  }}
+                >
+                  {s.toward === "CUMULATIVE" ? "ladder" : s.toward === "ATOMIC" ? "buckets" : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <Btn k="cumulative" label="Cumulative ladder" desc="Nested thresholds — by date, ≥ level. Enables corridors & credit spreads." />
         <Btn k="atomic" label="Distinct buckets" desc="Mutually-exclusive ranges (2–3, 50–60). Back adjacent buckets." />

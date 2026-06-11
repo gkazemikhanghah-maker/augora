@@ -397,6 +397,9 @@ export async function importLiveEvent(
             ...(suggestion.representation ? { representation: suggestion.representation } : {}),
             ...(suggestion.axisDirection ? { axisDirection: suggestion.axisDirection } : {}),
             taxonomyConfirmed: false, // human must confirm before corridor/credit products
+            taxonomyReason: suggestion.reason,
+            taxonomyConfidence: suggestion.confidence,
+            taxonomySignals: suggestion.signals,
           }
         : {}),
     };
