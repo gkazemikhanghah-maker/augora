@@ -43,6 +43,21 @@ export class Store {
     return e;
   }
 
+  /** Run a multi-step mutation across several markets atomically: snapshot the
+   *  ledger and every touched engine, run `fn`, and if it throws, restore all of
+   *  them and rethrow — so a partially-filled multi-leg group never half-commits. */
+  runAtomic<T>(marketIds: string[], fn: () => T): T {
+    const ledgerCp = this.ledger.checkpoint();
+    const engCps = [...new Set(marketIds)].map((id) => [id, this.engine(id).checkpoint()] as const);
+    try {
+      return fn();
+    } catch (e) {
+      this.ledger.rollback(ledgerCp);
+      for (const [id, cp] of engCps) this.engine(id).rollback(cp);
+      throw e;
+    }
+  }
+
   /** Auto-provision a playground account with virtual funds on first touch. */
   ensureUser(userId: string): void {
     if (this.knownUsers.has(userId)) return;

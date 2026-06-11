@@ -118,3 +118,40 @@ describe("settleOtherRows — synthetic Other auto-settles from resolved members
     expect(store.settlement.isSettled("G3-other")).toBe(false);
   });
 });
+
+describe("runAtomic — group execution rolls back on partial failure", () => {
+  it("restores ledger + engine when a leg throws mid-commit", () => {
+    const store = new Store();
+    seed(store);
+    const u = "rollback-tester";
+    store.ensureUser(u);
+    store.ledger.deposit(u, 100_000);
+    const balBefore = store.ledger.account(u).balanceCents;
+    const posBefore = store.engine("BTC-68K").positionsForUser(u).length;
+
+    expect(() =>
+      store.runAtomic(["BTC-68K"], () => {
+        store.engine("BTC-68K").submit({ userId: u, side: "YES", type: "market", qty: 10 });
+        throw new Error("boom"); // simulate a later leg failing
+      }),
+    ).toThrow("boom");
+
+    expect(store.ledger.account(u).balanceCents).toBe(balBefore); // money untouched
+    expect(store.engine("BTC-68K").positionsForUser(u).length).toBe(posBefore); // no position left
+    store.ledger.assertConservation();
+  });
+
+  it("commits normally when fn succeeds", () => {
+    const store = new Store();
+    seed(store);
+    const u = "commit-tester";
+    store.ensureUser(u);
+    store.ledger.deposit(u, 100_000);
+    const r = store.runAtomic(["BTC-68K"], () =>
+      store.engine("BTC-68K").submit({ userId: u, side: "YES", type: "market", qty: 10 }),
+    );
+    expect(r.trades.length).toBeGreaterThan(0);
+    expect(store.engine("BTC-68K").positionsForUser(u).length).toBe(1);
+    store.ledger.assertConservation();
+  });
+});

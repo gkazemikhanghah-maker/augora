@@ -186,4 +186,16 @@ export class Ledger {
     this.entries.push(...s.entries);
     this.seq = s.seq;
   }
+
+  /** Rollback-safe checkpoint for atomic multi-step transactions. Balances are
+   *  copied; `entries` is append-only so we just remember its length to truncate. */
+  checkpoint(): { balances: [string, Cents][]; entriesLen: number; seq: number } {
+    return { balances: [...this.balances], entriesLen: this.entries.length, seq: this.seq };
+  }
+
+  rollback(c: { balances: [string, Cents][]; entriesLen: number; seq: number }): void {
+    this.balances = new Map(c.balances);
+    this.entries.length = c.entriesLen;
+    this.seq = c.seq;
+  }
 }

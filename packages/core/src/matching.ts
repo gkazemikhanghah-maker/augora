@@ -558,4 +558,31 @@ export class MatchingEngine {
     this.orderSeq = s.orderSeq;
     this.tradeSeq = s.tradeSeq;
   }
+
+  /** Rollback-safe checkpoint: DEEP-copies the mutable state (resting orders and
+   *  positions are mutated in place during matching, so a shallow copy wouldn't
+   *  protect them). `trades` is append-only, so we just remember its length. */
+  checkpoint() {
+    return {
+      bidsYES: this.bidsYES.map((o) => ({ ...o })),
+      bidsNO: this.bidsNO.map((o) => ({ ...o })),
+      positions: [...this.positions].map(([k, p]) => [k, { ...p }]) as [string, Position][],
+      tradesLen: this.trades.length,
+      mintedPairs: this.mintedPairs,
+      clock: this.clock,
+      orderSeq: this.orderSeq,
+      tradeSeq: this.tradeSeq,
+    };
+  }
+
+  rollback(c: ReturnType<MatchingEngine["checkpoint"]>): void {
+    this.bidsYES = c.bidsYES.map((o) => ({ ...o }));
+    this.bidsNO = c.bidsNO.map((o) => ({ ...o }));
+    this.positions = new Map(c.positions.map(([k, p]) => [k, { ...p }]));
+    this.trades.length = c.tradesLen;
+    this.mintedPairs = c.mintedPairs;
+    this.clock = c.clock;
+    this.orderSeq = c.orderSeq;
+    this.tradeSeq = c.tradeSeq;
+  }
 }

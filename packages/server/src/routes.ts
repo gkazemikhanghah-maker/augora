@@ -276,20 +276,28 @@ export function registerRoutes(app: FastifyInstance, store: Store, hub: Hub, sav
       const bal = store.ledger.account(userId).balanceCents;
       if (preview.totalCollateralCents + preview.totalFeeCents > bal)
         return reply.code(402).send({ error: "Insufficient balance", preview });
-      // 4) commit — single-threaded, so what preview validated is what executes
-      const executed = legs.map((leg) => ({
-        marketId: leg.marketId,
-        ...(leg.intent === "write"
-          ? store.engine(leg.marketId).write({ userId, side: leg.side, qty: leg.qty })
-          : store.engine(leg.marketId).submit({
-              userId,
-              side: leg.side,
-              type: leg.type,
-              priceCents: leg.priceCents,
-              qty: leg.qty,
-            })),
-      }));
+      // 4) commit atomically — if any leg throws mid-way, ALL legs roll back so
+      //    the basket never half-commits (snapshot/restore of ledger + engines).
       const touched = [...new Set(legs.map((l) => l.marketId))];
+      let executed;
+      try {
+        executed = store.runAtomic(touched, () =>
+          legs.map((leg) => ({
+            marketId: leg.marketId,
+            ...(leg.intent === "write"
+              ? store.engine(leg.marketId).write({ userId, side: leg.side, qty: leg.qty })
+              : store.engine(leg.marketId).submit({
+                  userId,
+                  side: leg.side,
+                  type: leg.type,
+                  priceCents: leg.priceCents,
+                  qty: leg.qty,
+                })),
+          })),
+        );
+      } catch (e) {
+        return reply.code(409).send({ error: `Group rolled back — nothing committed: ${(e as Error).message}`, preview });
+      }
       for (const mid of touched) {
         store.recordPrice(mid);
         hub.broadcast(mid);
