@@ -1,4 +1,4 @@
-import type { Market, MarketType } from "@augora/core";
+import type { Market, MarketType, Side } from "@augora/core";
 import { suggestTaxonomy } from "@augora/core";
 import { Store } from "./store.js";
 import { getLiveMarket, getLiveEvent, liveGroupLabel, parseOrderKey, fetchLiveHistory, type LiveMarket, type LiveEvent } from "./livedata.js";
@@ -488,6 +488,38 @@ export async function syncLiveSettlements(store: Store): Promise<string[]> {
       market.status = "settled";
       settled.push(id);
     }
+  }
+  // the synthetic "Other" rows have no Polymarket id, so the loop above skips
+  // them — derive their outcome from the now-resolved real members instead.
+  settled.push(...settleOtherRows(store));
+  return settled;
+}
+
+/**
+ * Auto-settle the synthetic "Other" row of each categorical group once ALL of its
+ * real (sourced) members have resolved. Categorical outcomes are mutually exclusive,
+ * so "Other" (none of the listed options) wins YES iff no listed option won, and
+ * loses NO if exactly one listed option won. Idempotent + safe to call on a timer.
+ */
+export function settleOtherRows(store: Store): string[] {
+  const settled: string[] = [];
+  const groups = new Map<string, Market[]>();
+  for (const m of store.markets.values()) {
+    if (m.type !== "categorical" || !m.groupId) continue;
+    const arr = groups.get(m.groupId);
+    if (arr) arr.push(m);
+    else groups.set(m.groupId, [m]);
+  }
+  for (const members of groups.values()) {
+    const other = members.find((m) => !m.sourceId);
+    if (!other || store.settlement.isSettled(other.id)) continue;
+    const sourced = members.filter((m) => m.sourceId);
+    if (sourced.length === 0 || !sourced.every((m) => store.settlement.isSettled(m.id))) continue; // wait for all
+    const anyYes = sourced.some((m) => store.settlement.get(m.id)?.outcome === "YES");
+    const outcome: Side = anyYes ? "NO" : "YES";
+    store.settlement.settle(store.engine(other.id), store.ledger, outcome, { oracleSource: "derived-other" });
+    other.status = "settled";
+    settled.push(other.id);
   }
   return settled;
 }

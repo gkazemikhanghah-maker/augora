@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { escrowId, PLATFORM, checkCategorical, checkLadder } from "@augora/core";
 import { Store, PLAYGROUND_START_CENTS } from "../src/store.js";
 import { seed } from "../src/seed.js";
-import { normalizeToHundred } from "../src/liveimport.js";
+import { normalizeToHundred, settleOtherRows } from "../src/liveimport.js";
 
 describe("server seed + wiring (in-memory Store)", () => {
   it("seeds all three market types with valid type constraints", () => {
@@ -76,5 +76,45 @@ describe("normalizeToHundred — categorical group prices sum to 100¢", () => {
     const out = normalizeToHundred([1, 1, 1, 1, 1], null);
     expect(sum(out)).toBe(100);
     out.forEach((v) => expect(v).toBeGreaterThanOrEqual(1));
+  });
+});
+
+describe("settleOtherRows — synthetic Other auto-settles from resolved members", () => {
+  const mk = (groupId: string, id: string, sourceId: string | null) => ({
+    id, question: id, type: "categorical" as const, groupId,
+    expiryTs: Date.now() + 1_000_000, status: "open" as const,
+    feeMult: 0, tickSize: 1, createdTs: Date.now(), source: "polymarket" as const,
+    ...(sourceId ? { sourceId } : {}),
+  });
+  const build = (store: Store, g: string) => {
+    store.addMarket(mk(g, `${g}-0`, "a"));
+    store.addMarket(mk(g, `${g}-1`, "b"));
+    store.addMarket(mk(g, `${g}-other`, null));
+  };
+
+  it("Other resolves NO when a listed option won", () => {
+    const store = new Store();
+    build(store, "G1");
+    store.settlement.settle(store.engine("G1-0"), store.ledger, "YES");
+    store.settlement.settle(store.engine("G1-1"), store.ledger, "NO");
+    expect(settleOtherRows(store)).toContain("G1-other");
+    expect(store.settlement.get("G1-other")?.outcome).toBe("NO");
+  });
+
+  it("Other resolves YES when no listed option won (the field)", () => {
+    const store = new Store();
+    build(store, "G2");
+    store.settlement.settle(store.engine("G2-0"), store.ledger, "NO");
+    store.settlement.settle(store.engine("G2-1"), store.ledger, "NO");
+    expect(settleOtherRows(store)).toContain("G2-other");
+    expect(store.settlement.get("G2-other")?.outcome).toBe("YES");
+  });
+
+  it("waits until every listed member has resolved", () => {
+    const store = new Store();
+    build(store, "G3");
+    store.settlement.settle(store.engine("G3-0"), store.ledger, "NO");
+    expect(settleOtherRows(store)).not.toContain("G3-other");
+    expect(store.settlement.isSettled("G3-other")).toBe(false);
   });
 });

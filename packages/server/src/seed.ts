@@ -121,6 +121,61 @@ export function seed(store: Store): void {
     quote(store, m.id, c.fair, 2, 300);
     seedHistory(store, m.id, Math.max(1, c.fair - 4), c.fair);
   }
+
+  // 4) MORE BINARIES across categories, so the Markets page has real breadth
+  //    (the full Polymarket-scale catalog comes via the Live import tab).
+  const binaries: Array<{ id: string; q: string; cat: string; asset?: string; strike?: number; fair: number; days: number }> = [
+    { id: "ETH-4K", q: "Will ETH be \u2265 $4,000 at expiry?", cat: "Crypto", asset: "ETH", strike: 4000, fair: 44, days: 14 },
+    { id: "SOL-ETF-2026", q: "Will a spot SOL ETF launch in 2026?", cat: "Crypto", fair: 62, days: 210 },
+    { id: "FED-CUT-SEP26", q: "Fed rate cut by September 2026?", cat: "Economy", fair: 71, days: 100 },
+    { id: "US-RECESSION-26", q: "US recession declared in 2026?", cat: "Economy", fair: 27, days: 300 },
+    { id: "GPT6-2026", q: "Will OpenAI release GPT-6 in 2026?", cat: "Tech", fair: 35, days: 240 },
+    { id: "FOLD-IPHONE-26", q: "Apple ships a foldable iPhone in 2026?", cat: "Tech", fair: 22, days: 260 },
+    { id: "HOUSE-2028", q: "Will the incumbent party hold the House in 2028?", cat: "Politics", fair: 48, days: 365 },
+    { id: "CEASEFIRE-26", q: "Iran\u2013US ceasefire holds through 2026?", cat: "Geopolitics", fair: 55, days: 200 },
+  ];
+  for (const b of binaries) {
+    const m = mkMarket({
+      id: b.id,
+      question: b.q,
+      type: "binary",
+      groupId: b.id,
+      category: b.cat,
+      feeMult: 0.07,
+      ...(b.asset ? { asset: b.asset, strike: b.strike } : {}),
+      expiryTs: Date.now() + b.days * DAY,
+    });
+    store.addMarket(m);
+    quote(store, m.id, b.fair, 2, 300);
+    seedHistory(store, m.id, Math.max(1, b.fair - 7), b.fair);
+  }
+
+  // 5) A SECOND CATEGORICAL (Sports) — winner-take-all among listed teams (Σ ≈ 100¢).
+  const wcGroup = "WORLDCUP-2026";
+  const teams: Array<{ id: string; label: string; fair: number }> = [
+    { id: "WC-BRA", label: "Brazil", fair: 26 },
+    { id: "WC-FRA", label: "France", fair: 22 },
+    { id: "WC-ARG", label: "Argentina", fair: 20 },
+    { id: "WC-ESP", label: "Spain", fair: 17 },
+    { id: "WC-ENG", label: "England", fair: 15 },
+  ];
+  for (const t of teams) {
+    const m = mkMarket({
+      id: t.id,
+      question: `2026 World Cup winner: ${t.label}?`,
+      type: "categorical",
+      groupId: wcGroup,
+      category: "Sports",
+      groupTitle: "2026 World Cup winner",
+      optionLabel: t.label,
+      orderingType: "NOMINAL",
+      taxonomyConfirmed: true,
+      expiryTs: Date.now() + 200 * DAY,
+    });
+    store.addMarket(m);
+    quote(store, m.id, t.fair, 2, 300);
+    seedHistory(store, m.id, Math.max(1, t.fair - 4), t.fair);
+  }
 }
 
 export const SEED_BOT = MM;
